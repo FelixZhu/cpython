@@ -129,30 +129,6 @@ elementtree_free(void *m)
 /* helpers */
 
 LOCAL(PyObject*)
-deepcopy(PyObject* object, PyObject* memo)
-{
-    /* do a deep copy of the given object */
-    PyObject* args;
-    PyObject* result;
-    elementtreestate *st = ET_STATE_GLOBAL;
-
-    if (!st->deepcopy_obj) {
-        PyErr_SetString(
-            PyExc_RuntimeError,
-            "deepcopy helper not found"
-            );
-        return NULL;
-    }
-
-    args = PyTuple_Pack(2, object, memo);
-    if (!args)
-        return NULL;
-    result = PyObject_CallObject(st->deepcopy_obj, args);
-    Py_DECREF(args);
-    return result;
-}
-
-LOCAL(PyObject*)
 list_join(PyObject* list)
 {
     /* join list elements (destroying the list in the process) */
@@ -748,6 +724,9 @@ _elementtree_Element___copy___impl(ElementObject *self)
     return (PyObject*) element;
 }
 
+/* Helper for a deep copy. */
+LOCAL(PyObject *) deepcopy(PyObject *, PyObject *);
+
 /*[clinic input]
 _elementtree.Element.__deepcopy__
 
@@ -837,6 +816,57 @@ _elementtree_Element___deepcopy__(ElementObject *self, PyObject *memo)
     Py_DECREF(element);
     return NULL;
 }
+
+LOCAL(PyObject *)
+deepcopy(PyObject *object, PyObject *memo)
+{
+    /* do a deep copy of the given object */
+    PyObject *args;
+    PyObject *result;
+    elementtreestate *st;
+
+    /* Fast paths */
+    if (object == Py_None || PyUnicode_CheckExact(object)) {
+        Py_INCREF(object);
+        return object;
+    }
+
+    if (Py_REFCNT(object) == 1) {
+        if (PyDict_CheckExact(object)) {
+            PyObject *key, *value;
+            Py_ssize_t pos = 0;
+            int simple = 1;
+            while (PyDict_Next(object, &pos, &key, &value)) {
+                if (!PyUnicode_CheckExact(key) || !PyUnicode_CheckExact(value)) {
+                    simple = 0;
+                    break;
+                }
+            }
+            if (simple)
+                return PyDict_Copy(object);
+            /* Fall through to general case */
+        }
+        else if (Element_CheckExact(object)) {
+            return _elementtree_Element___deepcopy__((ElementObject *)object, memo);
+        }
+    }
+
+    /* General case */
+    st = ET_STATE_GLOBAL;
+    if (!st->deepcopy_obj) {
+        PyErr_SetString(PyExc_RuntimeError,
+                        "deepcopy helper not found");
+        return NULL;
+    }
+
+    args = PyTuple_Pack(2, object, memo);
+    if (!args)
+        return NULL;
+    result = PyObject_CallObject(st->deepcopy_obj, args);
+    Py_DECREF(args);
+    return result;
+}
+
 
 /*[clinic input]
 _elementtree.Element.__sizeof__ -> Py_ssize_t
@@ -1986,22 +2016,22 @@ static PySequenceMethods element_as_sequence = {
  * pre-order traversal. To keep track of which sub-element should be returned
  * next, a stack of parents is maintained. This is a standard stack-based
  * iterative pre-order traversal of a tree.
- * The stack is managed using a single-linked list starting at parent_stack.
- * Each stack node contains the saved parent to which we should return after
+ * The stack is managed using a continuous array.
+ * Each stack item contains the saved parent to which we should return after
  * the current one is exhausted, and the next child to examine in that parent.
  */
 typedef struct ParentLocator_t {
     ElementObject *parent;
     Py_ssize_t child_index;
-    struct ParentLocator_t *next;
 } ParentLocator;
 
 typedef struct {
     PyObject_HEAD
     ParentLocator *parent_stack;
+    Py_ssize_t parent_stack_used;
+    Py_ssize_t parent_stack_size;
     ElementObject *root_element;
     PyObject *sought_tag;
-    int root_done;
     int gettext;
 } ElementIterObject;
 
@@ -2009,13 +2039,11 @@ typedef struct {
 static void
 elementiter_dealloc(ElementIterObject *it)
 {
-    ParentLocator *p = it->parent_stack;
-    while (p) {
-        ParentLocator *temp = p;
-        Py_XDECREF(p->parent);
-        p = p->next;
-        PyObject_Free(temp);
-    }
+    Py_ssize_t i = it->parent_stack_used;
+    it->parent_stack_used = 0;
+    while (i--)
+        Py_XDECREF(it->parent_stack[i].parent);
+    PyMem_Free(it->parent_stack);
 
     Py_XDECREF(it->sought_tag);
     Py_XDECREF(it->root_element);
@@ -2027,11 +2055,9 @@ elementiter_dealloc(ElementIterObject *it)
 static int
 elementiter_traverse(ElementIterObject *it, visitproc visit, void *arg)
 {
-    ParentLocator *p = it->parent_stack;
-    while (p) {
-        Py_VISIT(p->parent);
-        p = p->next;
-    }
+    Py_ssize_t i = it->parent_stack_used;
+    while (i--)
+        Py_VISIT(it->parent_stack[i].parent);
 
     Py_VISIT(it->root_element);
     Py_VISIT(it->sought_tag);
@@ -2040,17 +2066,25 @@ elementiter_traverse(ElementIterObject *it, visitproc visit, void *arg)
 
 /* Helper function for elementiter_next. Add a new parent to the parent stack.
  */
-static ParentLocator *
-parent_stack_push_new(ParentLocator *stack, ElementObject *parent)
+static int
+parent_stack_push_new(ElementIterObject *it, ElementObject *parent)
 {
-    ParentLocator *new_node = PyObject_Malloc(sizeof(ParentLocator));
-    if (new_node) {
-        new_node->parent = parent;
-        Py_INCREF(parent);
-        new_node->child_index = 0;
-        new_node->next = stack;
+    ParentLocator *item;
+
+    if (it->parent_stack_used >= it->parent_stack_size) {
+        Py_ssize_t new_size = it->parent_stack_size * 2;  /* never overflow */
+        ParentLocator *parent_stack = it->parent_stack;
+        PyMem_Resize(parent_stack, ParentLocator, new_size);
+        if (parent_stack == NULL)
+            return -1;
+        it->parent_stack = parent_stack;
+        it->parent_stack_size = new_size;
     }
-    return new_node;
+    item = it->parent_stack + it->parent_stack_used++;
+    Py_INCREF(parent);
+    item->parent = parent;
+    item->child_index = 0;
+    return 0;
 }
 
 static PyObject *
@@ -2067,125 +2101,91 @@ elementiter_next(ElementIterObject *it)
      *   - itertext() also has to handle tail, after finishing with all the
      *     children of a node.
      */
-    ElementObject *cur_parent;
-    Py_ssize_t child_index;
     int rc;
+    ElementObject *elem;
+    PyObject *text;
 
     while (1) {
         /* Handle the case reached in the beginning and end of iteration, where
-         * the parent stack is empty. The root_done flag gives us indication
-         * whether we've just started iterating (so root_done is 0), in which
-         * case the root is returned. If root_done is 1 and we're here, the
+         * the parent stack is empty. If root_element is NULL and we're here, the
          * iterator is exhausted.
          */
-        if (!it->parent_stack->parent) {
-            if (it->root_done) {
+        if (!it->parent_stack_used) {
+            if (!it->root_element) {
                 PyErr_SetNone(PyExc_StopIteration);
                 return NULL;
-            } else {
-                it->parent_stack = parent_stack_push_new(it->parent_stack,
-                                                         it->root_element);
-                if (!it->parent_stack) {
-                    PyErr_NoMemory();
-                    return NULL;
-                }
-
-                it->root_done = 1;
-                rc = (it->sought_tag == Py_None);
-                if (!rc) {
-                    rc = PyObject_RichCompareBool(it->root_element->tag,
-                                                  it->sought_tag, Py_EQ);
-                    if (rc < 0)
-                        return NULL;
-                }
-                if (rc) {
-                    if (it->gettext) {
-                        PyObject *text = element_get_text(it->root_element);
-                        if (!text)
-                            return NULL;
-                        rc = PyObject_IsTrue(text);
-                        if (rc < 0)
-                            return NULL;
-                        if (rc) {
-                            Py_INCREF(text);
-                            return text;
-                        }
-                    } else {
-                        Py_INCREF(it->root_element);
-                        return (PyObject *)it->root_element;
-                    }
-                }
-            }
-        }
-
-        /* See if there are children left to traverse in the current parent. If
-         * yes, visit the next child. If not, pop the stack and try again.
-         */
-        cur_parent = it->parent_stack->parent;
-        child_index = it->parent_stack->child_index;
-        if (cur_parent->extra && child_index < cur_parent->extra->length) {
-            ElementObject *child = (ElementObject *)
-                cur_parent->extra->children[child_index];
-            it->parent_stack->child_index++;
-            it->parent_stack = parent_stack_push_new(it->parent_stack,
-                                                     child);
-            if (!it->parent_stack) {
-                PyErr_NoMemory();
-                return NULL;
             }
 
-            if (it->gettext) {
-                PyObject *text = element_get_text(child);
-                if (!text)
-                    return NULL;
-                rc = PyObject_IsTrue(text);
-                if (rc < 0)
-                    return NULL;
-                if (rc) {
-                    Py_INCREF(text);
-                    return text;
-                }
-            } else {
-                rc = (it->sought_tag == Py_None);
-                if (!rc) {
-                    rc = PyObject_RichCompareBool(child->tag,
-                                                  it->sought_tag, Py_EQ);
-                    if (rc < 0)
-                        return NULL;
-                }
-                if (rc) {
-                    Py_INCREF(child);
-                    return (PyObject *)child;
-                }
-            }
+            elem = it->root_element;  /* steals a reference */
+            it->root_element = NULL;
         }
         else {
-            PyObject *tail;
-            ParentLocator *next = it->parent_stack->next;
-            if (it->gettext) {
-                tail = element_get_tail(cur_parent);
-                if (!tail)
-                    return NULL;
-            }
-            else
-                tail = Py_None;
-            Py_XDECREF(it->parent_stack->parent);
-            PyObject_Free(it->parent_stack);
-            it->parent_stack = next;
-
-            /* Note that extra condition on it->parent_stack->parent here;
-             * this is because itertext() is supposed to only return *inner*
-             * text, not text following the element it began iteration with.
+            /* See if there are children left to traverse in the current parent. If
+             * yes, visit the next child. If not, pop the stack and try again.
              */
-            if (it->parent_stack->parent) {
-                rc = PyObject_IsTrue(tail);
-                if (rc < 0)
-                    return NULL;
-                if (rc) {
-                    Py_INCREF(tail);
-                    return tail;
+            ParentLocator *item = &it->parent_stack[it->parent_stack_used - 1];
+            Py_ssize_t child_index = item->child_index;
+            ElementObjectExtra *extra;
+            elem = item->parent;
+            extra = elem->extra;
+            if (!extra || child_index >= extra->length) {
+                it->parent_stack_used--;
+                /* Note that extra condition on it->parent_stack_used here;
+                 * this is because itertext() is supposed to only return *inner*
+                 * text, not text following the element it began iteration with.
+                 */
+                if (it->gettext && it->parent_stack_used) {
+                    text = element_get_tail(elem);
+                    goto gettext;
                 }
+                Py_DECREF(elem);
+                continue;
             }
+
+            elem = (ElementObject *)extra->children[child_index];
+            item->child_index++;
+            Py_INCREF(elem);
+        }
+
+        if (parent_stack_push_new(it, elem) < 0) {
+            Py_DECREF(elem);
+            PyErr_NoMemory();
+            return NULL;
+        }
+        if (it->gettext) {
+            text = element_get_text(elem);
+            goto gettext;
+        }
+
+        if (it->sought_tag == Py_None)
+            return (PyObject *)elem;
+
+        rc = PyObject_RichCompareBool(elem->tag, it->sought_tag, Py_EQ);
+        if (rc > 0)
+            return (PyObject *)elem;
+
+        Py_DECREF(elem);
+        if (rc < 0)
+            return NULL;
+        continue;
+
+gettext:
+        if (!text) {
+            Py_DECREF(elem);
+            return NULL;
+        }
+        if (text == Py_None) {
+            Py_DECREF(elem);
+        }
+        else {
+            Py_INCREF(text);
+            Py_DECREF(elem);
+            rc = PyObject_IsTrue(text);
+            if (rc > 0)
+                return text;
+            Py_DECREF(text);
+            if (rc < 0)
+                return NULL;
         }
     }
 
@@ -2237,6 +2237,7 @@ static PyTypeObject ElementIter_Type = {
     0,                                          /* tp_new */
 };
 
+#define INIT_PARENT_STACK_SIZE 8
 
 static PyObject *
 create_elementiter(ElementObject *self, PyObject *tag, int gettext)
@@ -2249,22 +2250,20 @@ create_elementiter(ElementObject *self, PyObject *tag, int gettext)
 
     Py_INCREF(tag);
     it->sought_tag = tag;
-    it->root_done = 0;
     it->gettext = gettext;
     Py_INCREF(self);
     it->root_element = self;
 
     PyObject_GC_Track(it);
 
-    it->parent_stack = PyObject_Malloc(sizeof(ParentLocator));
+    it->parent_stack = PyMem_New(ParentLocator, INIT_PARENT_STACK_SIZE);
     if (it->parent_stack == NULL) {
         Py_DECREF(it);
         PyErr_NoMemory();
         return NULL;
     }
-    it->parent_stack->parent = NULL;
-    it->parent_stack->child_index = 0;
-    it->parent_stack->next = NULL;
+    it->parent_stack_used = 0;
+    it->parent_stack_size = INIT_PARENT_STACK_SIZE;
 
     return (PyObject *)it;
 }
