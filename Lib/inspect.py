@@ -171,20 +171,31 @@ def isfunction(object):
 def isgeneratorfunction(object):
     """Return true if the object is a user-defined generator function.
 
-    Generator function objects provides same attributes as functions.
-
-    See help(isfunction) for attributes listing."""
+    Generator function objects provide the same attributes as functions.
+    See help(isfunction) for a list of attributes."""
     return bool((isfunction(object) or ismethod(object)) and
                 object.__code__.co_flags & CO_GENERATOR)
 
 def iscoroutinefunction(object):
     """Return true if the object is a coroutine function.
 
-    Coroutine functions are defined with "async def" syntax,
-    or generators decorated with "types.coroutine".
+    Coroutine functions are defined with "async def" syntax.
     """
     return bool((isfunction(object) or ismethod(object)) and
                 object.__code__.co_flags & CO_COROUTINE)
+
+def isasyncgenfunction(object):
+    """Return true if the object is an asynchronous generator function.
+
+    Asynchronous generator functions are defined with "async def"
+    syntax and have "yield" expressions in their body.
+    """
+    return bool((isfunction(object) or ismethod(object)) and
+                object.__code__.co_flags & CO_ASYNC_GENERATOR)
+
+def isasyncgen(object):
+    """Return true if the object is an asynchronous generator."""
+    return isinstance(object, types.AsyncGeneratorType)
 
 def isgenerator(object):
     """Return true if the object is a generator.
@@ -208,10 +219,10 @@ def iscoroutine(object):
     return isinstance(object, types.CoroutineType)
 
 def isawaitable(object):
-    """Return true is object can be passed to an ``await`` expression."""
+    """Return true if object can be passed to an ``await`` expression."""
     return (isinstance(object, types.CoroutineType) or
             isinstance(object, types.GeneratorType) and
-                object.gi_code.co_flags & CO_ITERABLE_COROUTINE or
+                bool(object.gi_code.co_flags & CO_ITERABLE_COROUTINE) or
             isinstance(object, collections.abc.Awaitable))
 
 def istraceback(object):
@@ -1004,22 +1015,55 @@ def _getfullargs(co):
         varkw = co.co_varnames[nargs]
     return args, varargs, kwonlyargs, varkw
 
+
+ArgSpec = namedtuple('ArgSpec', 'args varargs keywords defaults')
+
+def getargspec(func):
+    """Get the names and default values of a function's parameters.
+
+    A tuple of four things is returned: (args, varargs, keywords, defaults).
+    'args' is a list of the argument names, including keyword-only argument names.
+    'varargs' and 'keywords' are the names of the * and ** parameters or None.
+    'defaults' is an n-tuple of the default values of the last n parameters.
+
+    This function is deprecated, as it does not support annotations or
+    keyword-only parameters and will raise ValueError if either is present
+    on the supplied callable.
+
+    For a more structured introspection API, use inspect.signature() instead.
+
+    Alternatively, use getfullargspec() for an API with a similar namedtuple
+    based interface, but full support for annotations and keyword-only
+    parameters.
+    """
+    warnings.warn("inspect.getargspec() is deprecated, "
+                  "use inspect.signature() or inspect.getfullargspec()",
+                  DeprecationWarning, stacklevel=2)
+    args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, ann = \
+        getfullargspec(func)
+    if kwonlyargs or ann:
+        raise ValueError("Function has keyword-only parameters or annotations"
+                         ", use getfullargspec() API which can support them")
+    return ArgSpec(args, varargs, varkw, defaults)
+
 FullArgSpec = namedtuple('FullArgSpec',
     'args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations')
 
 def getfullargspec(func):
-    """Get the names and default values of a callable object's arguments.
+    """Get the names and default values of a callable object's parameters.
 
     A tuple of seven things is returned:
-    (args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults annotations).
-    'args' is a list of the argument names.
-    'varargs' and 'varkw' are the names of the * and ** arguments or None.
-    'defaults' is an n-tuple of the default values of the last n arguments.
-    'kwonlyargs' is a list of keyword-only argument names.
+    (args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations).
+    'args' is a list of the parameter names.
+    'varargs' and 'varkw' are the names of the * and ** parameters or None.
+    'defaults' is an n-tuple of the default values of the last n parameters.
+    'kwonlyargs' is a list of keyword-only parameter names.
     'kwonlydefaults' is a dictionary mapping names from kwonlyargs to defaults.
-    'annotations' is a dictionary mapping argument names to annotations.
+    'annotations' is a dictionary mapping parameter names to annotations.
 
-    This function is deprecated, use inspect.signature() instead.
+    Notable differences from inspect.signature():
+      - the "self" parameter is always reported, even for bound methods
+      - wrapper chains defined by __wrapped__ *not* unwrapped automatically
     """
 
     try:
@@ -1109,6 +1153,8 @@ def getargvalues(frame):
     return ArgInfo(args, varargs, varkw, frame.f_locals)
 
 def formatannotation(annotation, base_module=None):
+    if getattr(annotation, '__module__', None) == 'typing':
+        return repr(annotation).replace('typing.', '')
     if isinstance(annotation, type):
         if annotation.__module__ in ('builtins', base_module):
             return annotation.__qualname__
@@ -1370,7 +1416,6 @@ def getframeinfo(frame, context=1):
         except OSError:
             lines = index = None
         else:
-            start = max(start, 1)
             start = max(0, min(start, len(lines) - context))
             lines = lines[start:start+context]
             index = lineno - 1 - start
@@ -2371,6 +2416,20 @@ class Parameter:
         if not isinstance(name, str):
             raise TypeError("name must be a str, not a {!r}".format(name))
 
+        if name[0] == '.' and name[1:].isdigit():
+            # These are implicit arguments generated by comprehensions. In
+            # order to provide a friendlier interface to users, we recast
+            # their name as "implicitN" and treat them as positional-only.
+            # See issue 19611.
+            if kind != _POSITIONAL_OR_KEYWORD:
+                raise ValueError(
+                    'implicit arguments must be passed in as {}'.format(
+                        _POSITIONAL_OR_KEYWORD
+                    )
+                )
+            self._kind = _POSITIONAL_ONLY
+            name = 'implicit{}'.format(name[1:])
+
         if not name.isidentifier():
             raise ValueError('{!r} is not a valid parameter name'.format(name))
 
@@ -2546,8 +2605,6 @@ class BoundArguments:
         empty dict.
         """
         arguments = self.arguments
-        if not arguments:
-            return
         new_arguments = []
         for name, param in self._signature.parameters.items():
             try:

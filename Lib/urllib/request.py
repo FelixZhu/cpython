@@ -91,9 +91,9 @@ import os
 import posixpath
 import re
 import socket
+import string
 import sys
 import time
-import collections
 import tempfile
 import contextlib
 import warnings
@@ -133,24 +133,16 @@ __all__ = [
 ]
 
 # used in User-Agent header sent
-__version__ = sys.version[:3]
+__version__ = '%d.%d' % sys.version_info[:2]
 
 _opener = None
 def urlopen(url, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
             *, cafile=None, capath=None, cadefault=False, context=None):
     '''Open the URL url, which can be either a string or a Request object.
 
-    *data* must be a bytes object specifying additional data to be sent to the
-    server, or None if no such data is needed. data may also be an iterable
-    object and in that case Content-Length value must be specified in the
-    headers. Currently HTTP requests are the only ones that use data; the HTTP
-    request will be a POST instead of a GET when the data parameter is
-    provided.
-
-    *data* should be a buffer in the standard application/x-www-form-urlencoded
-    format. The urllib.parse.urlencode() function takes a mapping or sequence
-    of 2-tuples and returns an ASCII text string in this format. It should be
-    encoded to bytes before being used as the data parameter.
+    *data* must be an object specifying additional data to be sent to
+    the server, or None if no such data is needed.  See Request for
+    details.
 
     urllib.request module uses HTTP/1.1 and includes a "Connection:close"
     header in its HTTP requests.
@@ -171,13 +163,8 @@ def urlopen(url, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
 
     The *cadefault* parameter is ignored.
 
-    For http and https urls, this function returns a http.client.HTTPResponse
-    object which has the following HTTPResponse Objects methods.
-
-    For ftp, file, and data urls and requests explicitly handled by legacy
-    URLopener and FancyURLopener classes, this function returns a
-    urllib.response.addinfourl object which can work as context manager and has
-    methods such as:
+    This function always returns an object which can work as a context
+    manager and has methods such as
 
     * geturl() - return the URL of the resource retrieved, commonly used to
       determine if a redirect was followed
@@ -189,7 +176,17 @@ def urlopen(url, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
     * getcode() - return the HTTP status code of the response.  Raises URLError
       on errors.
 
-    Note that *None& may be returned if no handler handles the request (though
+    For HTTP and HTTPS URLs, this function returns a http.client.HTTPResponse
+    object slightly modified. In addition to the three new methods above, the
+    msg attribute contains the same information as the reason attribute ---
+    the reason phrase returned by the server --- instead of the response
+    headers as it is specified in the documentation for HTTPResponse.
+
+    For FTP, file, and data URLs and requests explicitly handled by legacy
+    URLopener and FancyURLopener classes, this function returns a
+    urllib.response.addinfourl object.
+
+    Note that None may be returned if no handler handles the request (though
     the default installed global OpenerDirector uses UnknownHandler to ensure
     this never happens).
 
@@ -200,6 +197,9 @@ def urlopen(url, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
     '''
     global _opener
     if cafile or capath or cadefault:
+        import warnings
+        warnings.warn("cafile, cpath and cadefault are deprecated, use a "
+                      "custom context instead.", DeprecationWarning, 2)
         if context is not None:
             raise ValueError(
                 "You can't pass both context and any of cafile, capath, and "
@@ -676,8 +676,12 @@ class HTTPRedirectHandler(BaseHandler):
         # from the user (of urllib.request, in this case).  In practice,
         # essentially all clients do redirect in this case, so we do
         # the same.
-        # be conciliant with URIs containing a space
+
+        # Be conciliant with URIs containing a space.  This is mainly
+        # redundant with the more complete encoding done in http_error_302(),
+        # but it is kept for compatibility with other callers.
         newurl = newurl.replace(' ', '%20')
+
         CONTENT_HEADERS = ("content-length", "content-type")
         newheaders = dict((k, v) for k, v in req.headers.items()
                           if k.lower() not in CONTENT_HEADERS)
@@ -712,11 +716,16 @@ class HTTPRedirectHandler(BaseHandler):
                 "%s - Redirection to url '%s' is not allowed" % (msg, newurl),
                 headers, fp)
 
-        if not urlparts.path:
+        if not urlparts.path and urlparts.netloc:
             urlparts = list(urlparts)
             urlparts[2] = "/"
         newurl = urlunparse(urlparts)
 
+        # http.client.parse_headers() decodes as ISO-8859-1.  Recover the
+        # original bytes and percent-encode non-ASCII bytes, and any special
+        # characters such as the space.
+        newurl = quote(
+            newurl, encoding="iso-8859-1", safe=string.punctuation)
         newurl = urljoin(req.full_url, newurl)
 
         # XXX Probably want to forget about the state of the current
@@ -1171,6 +1180,9 @@ class AbstractDigestAuthHandler:
         elif algorithm == 'SHA':
             H = lambda x: hashlib.sha1(x.encode("ascii")).hexdigest()
         # XXX MD5-sess
+        else:
+            raise ValueError("Unsupported digest authentication "
+                             "algorithm %r" % algorithm)
         KD = lambda s, d: H("%s:%s" % (s, d))
         return H, KD
 
@@ -1217,6 +1229,11 @@ class AbstractHTTPHandler(BaseHandler):
     def set_http_debuglevel(self, level):
         self._debuglevel = level
 
+    def _get_content_length(self, request):
+        return http.client.HTTPConnection._get_content_length(
+            request.data,
+            request.get_method())
+
     def do_request_(self, request):
         host = request.host
         if not host:
@@ -1225,24 +1242,22 @@ class AbstractHTTPHandler(BaseHandler):
         if request.data is not None:  # POST
             data = request.data
             if isinstance(data, str):
-                msg = "POST data should be bytes or an iterable of bytes. " \
-                      "It cannot be of type str."
+                msg = "POST data should be bytes, an iterable of bytes, " \
+                      "or a file object. It cannot be of type str."
                 raise TypeError(msg)
             if not request.has_header('Content-type'):
                 request.add_unredirected_header(
                     'Content-type',
                     'application/x-www-form-urlencoded')
-            if not request.has_header('Content-length'):
-                try:
-                    mv = memoryview(data)
-                except TypeError:
-                    if isinstance(data, collections.Iterable):
-                        raise ValueError("Content-Length should be specified "
-                                "for iterable data of type %r %r" % (type(data),
-                                data))
+            if (not request.has_header('Content-length')
+                    and not request.has_header('Transfer-encoding')):
+                content_length = self._get_content_length(request)
+                if content_length is not None:
+                    request.add_unredirected_header(
+                            'Content-length', str(content_length))
                 else:
                     request.add_unredirected_header(
-                            'Content-length', '%d' % (len(mv) * mv.itemsize))
+                            'Transfer-encoding', 'chunked')
 
         sel_host = host
         if request.has_proxy():
@@ -1268,6 +1283,7 @@ class AbstractHTTPHandler(BaseHandler):
 
         # will parse host:port
         h = http_class(host, timeout=req.timeout, **http_conn_args)
+        h.set_debuglevel(self._debuglevel)
 
         headers = dict(req.unredirected_hdrs)
         headers.update(dict((k, v) for k, v in req.headers.items()
@@ -1297,7 +1313,8 @@ class AbstractHTTPHandler(BaseHandler):
 
         try:
             try:
-                h.request(req.get_method(), req.selector, req.data, headers)
+                h.request(req.get_method(), req.selector, req.data, headers,
+                          encode_chunked=req.has_header('Transfer-encoding'))
             except OSError as err: # timeout error
                 raise URLError(err)
             r = h.getresponse()
@@ -1671,7 +1688,7 @@ class URLopener:
         self.proxies = proxies
         self.key_file = x509.get('key_file')
         self.cert_file = x509.get('cert_file')
-        self.addheaders = [('User-Agent', self.version)]
+        self.addheaders = [('User-Agent', self.version), ('Accept', '*/*')]
         self.__tempfiles = []
         self.__unlink = os.unlink # See cleanup()
         self.tempcache = None
@@ -2110,18 +2127,20 @@ class FancyURLopener(URLopener):
     def http_error_302(self, url, fp, errcode, errmsg, headers, data=None):
         """Error 302 -- relocated (temporarily)."""
         self.tries += 1
-        if self.maxtries and self.tries >= self.maxtries:
-            if hasattr(self, "http_error_500"):
-                meth = self.http_error_500
-            else:
-                meth = self.http_error_default
+        try:
+            if self.maxtries and self.tries >= self.maxtries:
+                if hasattr(self, "http_error_500"):
+                    meth = self.http_error_500
+                else:
+                    meth = self.http_error_default
+                return meth(url, fp, 500,
+                            "Internal Server Error: Redirect Recursion",
+                            headers)
+            result = self.redirect_internal(url, fp, errcode, errmsg,
+                                            headers, data)
+            return result
+        finally:
             self.tries = 0
-            return meth(url, fp, 500,
-                        "Internal Server Error: Redirect Recursion", headers)
-        result = self.redirect_internal(url, fp, errcode, errmsg, headers,
-                                        data)
-        self.tries = 0
-        return result
 
     def redirect_internal(self, url, fp, errcode, errmsg, headers, data):
         if 'location' in headers:
@@ -2450,19 +2469,41 @@ def getproxies_environment():
 
     """
     proxies = {}
+    # in order to prefer lowercase variables, process environment in
+    # two passes: first matches any, second pass matches lowercase only
     for name, value in os.environ.items():
         name = name.lower()
         if value and name[-6:] == '_proxy':
             proxies[name[:-6]] = value
+    # CVE-2016-1000110 - If we are running as CGI script, forget HTTP_PROXY
+    # (non-all-lowercase) as it may be set from the web server by a "Proxy:"
+    # header from the client
+    # If "proxy" is lowercase, it will still be used thanks to the next block
+    if 'REQUEST_METHOD' in os.environ:
+        proxies.pop('http', None)
+    for name, value in os.environ.items():
+        if name[-6:] == '_proxy':
+            name = name.lower()
+            if value:
+                proxies[name[:-6]] = value
+            else:
+                proxies.pop(name[:-6], None)
     return proxies
 
-def proxy_bypass_environment(host):
+def proxy_bypass_environment(host, proxies=None):
     """Test if proxies should not be used for a particular host.
 
-    Checks the environment for a variable named no_proxy, which should
-    be a list of DNS suffixes separated by commas, or '*' for all hosts.
+    Checks the proxy dict for the value of no_proxy, which should
+    be a list of comma separated DNS suffixes, or '*' for all hosts.
+
     """
-    no_proxy = os.environ.get('no_proxy', '') or os.environ.get('NO_PROXY', '')
+    if proxies is None:
+        proxies = getproxies_environment()
+    # don't bypass, if no_proxy isn't specified
+    try:
+        no_proxy = proxies['no']
+    except KeyError:
+        return 0
     # '*' is special case for always bypass
     if no_proxy == '*':
         return 1
@@ -2471,8 +2512,13 @@ def proxy_bypass_environment(host):
     # check if the host ends with any of the DNS suffixes
     no_proxy_list = [proxy.strip() for proxy in no_proxy.split(',')]
     for name in no_proxy_list:
-        if name and (hostonly.endswith(name) or host.endswith(name)):
-            return 1
+        if name:
+            name = name.lstrip('.')  # ignore leading dots
+            name = re.escape(name)
+            pattern = r'(.+\.)?%s$' % name
+            if (re.match(pattern, hostonly, re.I)
+                    or re.match(pattern, host, re.I)):
+                return 1
     # otherwise, don't bypass
     return 0
 
@@ -2557,8 +2603,15 @@ if sys.platform == 'darwin':
 
 
     def proxy_bypass(host):
-        if getproxies_environment():
-            return proxy_bypass_environment(host)
+        """Return True, if host should be bypassed.
+
+        Checks proxy settings gathered from the environment, if specified,
+        or from the MacOSX framework SystemConfiguration.
+
+        """
+        proxies = getproxies_environment()
+        if proxies:
+            return proxy_bypass_environment(host, proxies)
         else:
             return proxy_bypass_macosx_sysconf(host)
 
@@ -2672,14 +2725,15 @@ elif os.name == 'nt':
         return 0
 
     def proxy_bypass(host):
-        """Return a dictionary of scheme -> proxy server URL mappings.
+        """Return True, if host should be bypassed.
 
-        Returns settings gathered from the environment, if specified,
+        Checks proxy settings gathered from the environment, if specified,
         or the registry.
 
         """
-        if getproxies_environment():
-            return proxy_bypass_environment(host)
+        proxies = getproxies_environment()
+        if proxies:
+            return proxy_bypass_environment(host, proxies)
         else:
             return proxy_bypass_registry(host)
 

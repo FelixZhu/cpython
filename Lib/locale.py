@@ -1,13 +1,12 @@
-""" Locale support.
+"""Locale support module.
 
-    The module provides low-level access to the C lib's locale APIs
-    and adds high level number formatting APIs as well as a locale
-    aliasing engine to complement these.
+The module provides low-level access to the C lib's locale APIs and adds high
+level number formatting APIs as well as a locale aliasing engine to complement
+these.
 
-    The aliasing engine includes support for many commonly used locale
-    names and maps them to values suitable for passing to the C lib's
-    setlocale() function. It also includes default encodings for all
-    supported locale names.
+The aliasing engine includes support for many commonly used locale names and
+maps them to values suitable for passing to the C lib's setlocale() function. It
+also includes default encodings for all supported locale names.
 
 """
 
@@ -298,7 +297,7 @@ def currency(val, symbol=True, grouping=False, international=False):
     return s.replace('<', '').replace('>', '')
 
 def str(val):
-    """Convert float to integer, taking the locale into account."""
+    """Convert float to string, taking the locale into account."""
     return format("%.12g", val)
 
 def delocalize(string):
@@ -619,15 +618,21 @@ else:
     try:
         CODESET
     except NameError:
-        # Fall back to parsing environment variables :-(
-        def getpreferredencoding(do_setlocale = True):
-            """Return the charset that the user is likely using,
-            by looking at environment variables."""
-            res = getdefaultlocale()[1]
-            if res is None:
-                # LANG not set, default conservatively to ASCII
-                res = 'ascii'
-            return res
+        if hasattr(sys, 'getandroidapilevel'):
+            # On Android langinfo.h and CODESET are missing, and UTF-8 is
+            # always used in mbstowcs() and wcstombs().
+            def getpreferredencoding(do_setlocale = True):
+                return 'UTF-8'
+        else:
+            # Fall back to parsing environment variables :-(
+            def getpreferredencoding(do_setlocale = True):
+                """Return the charset that the user is likely using,
+                by looking at environment variables."""
+                res = getdefaultlocale()[1]
+                if res is None:
+                    # LANG not set, default conservatively to ASCII
+                    res = 'ascii'
+                return res
     else:
         def getpreferredencoding(do_setlocale = True):
             """Return the charset that the user is likely using,
@@ -1456,7 +1461,7 @@ windows_locale = {
     0x1809: "en_IE", # English - Ireland
     0x1c09: "en_ZA", # English - South Africa
     0x2009: "en_JA", # English - Jamaica
-    0x2409: "en_CB", # English - Carribbean
+    0x2409: "en_CB", # English - Caribbean
     0x2809: "en_BZ", # English - Belize
     0x2c09: "en_TT", # English - Trinidad
     0x3009: "en_ZW", # English - Zimbabwe

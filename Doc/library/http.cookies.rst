@@ -3,6 +3,7 @@
 
 .. module:: http.cookies
    :synopsis: Support for HTTP state management (cookies).
+
 .. moduleauthor:: Timothy O'Malley <timo@alum.mit.edu>
 .. sectionauthor:: Moshe Zadka <moshez@zadka.site.co.il>
 
@@ -141,44 +142,36 @@ Morsel Objects
    in HTTP requests, and is not accessible through JavaScript. This is intended
    to mitigate some forms of cross-site scripting.
 
-   The keys are case-insensitive.
+   The keys are case-insensitive and their default value is ``''``.
 
    .. versionchanged:: 3.5
       :meth:`~Morsel.__eq__` now takes :attr:`~Morsel.key` and :attr:`~Morsel.value`
       into account.
+
+   .. versionchanged:: 3.7
+      Attributes :attr:`~Morsel.key`, :attr:`~Morsel.value` and
+      :attr:`~Morsel.coded_value` are read-only.  Use :meth:`~Morsel.set` for
+      setting them.
 
 
 .. attribute:: Morsel.value
 
    The value of the cookie.
 
-   .. deprecated:: 3.5
-      assigning to ``value``; use :meth:`~Morsel.set` instead.
-
 
 .. attribute:: Morsel.coded_value
 
    The encoded value of the cookie --- this is what should be sent.
-
-   .. deprecated:: 3.5
-      assigning to ``coded_value``; use :meth:`~Morsel.set` instead.
 
 
 .. attribute:: Morsel.key
 
    The name of the cookie.
 
-   .. deprecated:: 3.5
-      assigning to ``key``; use :meth:`~Morsel.set` instead.
-
 
 .. method:: Morsel.set(key, value, coded_value)
 
    Set the *key*, *value* and *coded_value* attributes.
-
-   .. deprecated:: 3.5
-      The undocumented *LegalChars* parameter is ignored and will be removed in
-      a future version.
 
 
 .. method:: Morsel.isReservedKey(K)

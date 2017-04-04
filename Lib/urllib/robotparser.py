@@ -153,7 +153,7 @@ class RobotFileParser:
             return True
         # Until the robots.txt file has been read or found not
         # to exist, we must assume that no url is allowable.
-        # This prevents false positives when a user erronenously
+        # This prevents false positives when a user erroneously
         # calls can_fetch() before calling read().
         if not self.last_checked:
             return False
@@ -175,16 +175,20 @@ class RobotFileParser:
         return True
 
     def crawl_delay(self, useragent):
+        if not self.mtime():
+            return None
         for entry in self.entries:
             if entry.applies_to(useragent):
                 return entry.delay
-        return None
+        return self.default_entry.delay
 
     def request_rate(self, useragent):
+        if not self.mtime():
+            return None
         for entry in self.entries:
             if entry.applies_to(useragent):
                 return entry.req_rate
-        return None
+        return self.default_entry.req_rate
 
     def __str__(self):
         return ''.join([str(entry) + "\n" for entry in self.entries])

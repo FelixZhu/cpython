@@ -112,11 +112,9 @@ encoder_listencode_dict(PyEncoderObject *s, _PyAccu *acc, PyObject *dct, Py_ssiz
 static PyObject *
 _encoded_const(PyObject *obj);
 static void
-raise_errmsg(char *msg, PyObject *s, Py_ssize_t end);
+raise_errmsg(const char *msg, PyObject *s, Py_ssize_t end);
 static PyObject *
 encoder_encode_string(PyEncoderObject *s, PyObject *obj);
-static PyObject *
-encoder_encode_long(PyEncoderObject* s UNUSED, PyObject *obj);
 static PyObject *
 encoder_encode_float(PyEncoderObject *s, PyObject *obj);
 
@@ -323,7 +321,7 @@ escape_unicode(PyObject *pystr)
 }
 
 static void
-raise_errmsg(char *msg, PyObject *s, Py_ssize_t end)
+raise_errmsg(const char *msg, PyObject *s, Py_ssize_t end)
 {
     /* Use JSONDecodeError exception to raise a nice looking ValueError subclass */
     static PyObject *JSONDecodeError = NULL;
@@ -337,7 +335,7 @@ raise_errmsg(char *msg, PyObject *s, Py_ssize_t end)
         if (JSONDecodeError == NULL)
             return;
     }
-    exc = PyObject_CallFunction(JSONDecodeError, "(zOn)", msg, s, end);
+    exc = PyObject_CallFunction(JSONDecodeError, "zOn", msg, s, end);
     if (exc) {
         PyErr_SetObject(JSONDecodeError, exc);
         Py_DECREF(exc);
@@ -847,12 +845,14 @@ _parse_array_unicode(PyScannerObject *s, PyObject *pystr, Py_ssize_t idx, Py_ssi
     int kind;
     Py_ssize_t end_idx;
     PyObject *val = NULL;
-    PyObject *rval = PyList_New(0);
+    PyObject *rval;
     Py_ssize_t next_idx;
-    if (rval == NULL)
-        return NULL;
 
     if (PyUnicode_READY(pystr) == -1)
+        return NULL;
+
+    rval = PyList_New(0);
+    if (rval == NULL)
         return NULL;
 
     str = PyUnicode_DATA(pystr);
@@ -1108,17 +1108,15 @@ scan_once_unicode(PyScannerObject *s, PyObject *pystr, Py_ssize_t idx, Py_ssize_
         case 'n':
             /* null */
             if ((idx + 3 < length) && PyUnicode_READ(kind, str, idx + 1) == 'u' && PyUnicode_READ(kind, str, idx + 2) == 'l' && PyUnicode_READ(kind, str, idx + 3) == 'l') {
-                Py_INCREF(Py_None);
                 *next_idx_ptr = idx + 4;
-                return Py_None;
+                Py_RETURN_NONE;
             }
             break;
         case 't':
             /* true */
             if ((idx + 3 < length) && PyUnicode_READ(kind, str, idx + 1) == 'r' && PyUnicode_READ(kind, str, idx + 2) == 'u' && PyUnicode_READ(kind, str, idx + 3) == 'e') {
-                Py_INCREF(Py_True);
                 *next_idx_ptr = idx + 4;
-                return Py_True;
+                Py_RETURN_TRUE;
             }
             break;
         case 'f':
@@ -1127,9 +1125,8 @@ scan_once_unicode(PyScannerObject *s, PyObject *pystr, Py_ssize_t idx, Py_ssize_
                 PyUnicode_READ(kind, str, idx + 2) == 'l' &&
                 PyUnicode_READ(kind, str, idx + 3) == 's' &&
                 PyUnicode_READ(kind, str, idx + 4) == 'e') {
-                Py_INCREF(Py_False);
                 *next_idx_ptr = idx + 5;
-                return Py_False;
+                Py_RETURN_FALSE;
             }
             break;
         case 'N':
@@ -1445,38 +1442,9 @@ _encoded_const(PyObject *obj)
 }
 
 static PyObject *
-encoder_encode_long(PyEncoderObject* s UNUSED, PyObject *obj)
-{
-    /* Return the JSON representation of a PyLong and PyLong subclasses.
-       Calls int() on PyLong subclasses in case the str() was changed.
-       Added specifically to deal with IntEnum.  See Issue18264. */
-    PyObject *encoded, *longobj;
-    if (PyLong_CheckExact(obj)) {
-        encoded = PyObject_Str(obj);
-    }
-    else {
-        longobj = PyNumber_Long(obj);
-        if (longobj == NULL) {
-            PyErr_SetString(
-                    PyExc_ValueError,
-                    "Unable to coerce int subclass to int"
-                    );
-            return NULL;
-        }
-        encoded = PyObject_Str(longobj);
-        Py_DECREF(longobj);
-    }
-    return encoded;
-}
-
-
-static PyObject *
 encoder_encode_float(PyEncoderObject *s, PyObject *obj)
 {
-    /* Return the JSON representation of a PyFloat.
-       Modified to call float() on float subclasses in case the subclass
-       changes the repr.  See Issue18264.  */
-    PyObject *encoded, *floatobj;
+    /* Return the JSON representation of a PyFloat. */
     double i = PyFloat_AS_DOUBLE(obj);
     if (!Py_IS_FINITE(i)) {
         if (!s->allow_nan) {
@@ -1496,24 +1464,7 @@ encoder_encode_float(PyEncoderObject *s, PyObject *obj)
             return PyUnicode_FromString("NaN");
         }
     }
-    /* coerce float subclasses to float (primarily for Enum) */
-    if (PyFloat_CheckExact(obj)) {
-        /* Use a better float format here? */
-        encoded = PyObject_Repr(obj);
-    }
-    else {
-        floatobj = PyNumber_Float(obj);
-        if (floatobj == NULL) {
-            PyErr_SetString(
-                    PyExc_ValueError,
-                    "Unable to coerce float subclass to float"
-                    );
-            return NULL;
-        }
-        encoded = PyObject_Repr(floatobj);
-        Py_DECREF(floatobj);
-    }
-    return encoded;
+    return PyFloat_Type.tp_repr(obj);
 }
 
 static PyObject *
@@ -1557,7 +1508,7 @@ encoder_listencode_obj(PyEncoderObject *s, _PyAccu *acc,
         return _steal_accumulate(acc, encoded);
     }
     else if (PyLong_Check(obj)) {
-        PyObject *encoded = encoder_encode_long(s, obj);
+        PyObject *encoded = PyLong_Type.tp_str(obj);
         if (encoded == NULL)
             return -1;
         return _steal_accumulate(acc, encoded);
@@ -1607,8 +1558,11 @@ encoder_listencode_obj(PyEncoderObject *s, _PyAccu *acc,
             return -1;
         }
 
-        if (Py_EnterRecursiveCall(" while encoding a JSON object"))
+        if (Py_EnterRecursiveCall(" while encoding a JSON object")) {
+            Py_DECREF(newobj);
+            Py_XDECREF(ident);
             return -1;
+        }
         rv = encoder_listencode_obj(s, acc, newobj, indent_level);
         Py_LeaveRecursiveCall();
 
@@ -1652,7 +1606,7 @@ encoder_listencode_dict(PyEncoderObject *s, _PyAccu *acc,
         if (open_dict == NULL || close_dict == NULL || empty_dict == NULL)
             return -1;
     }
-    if (Py_SIZE(dct) == 0)
+    if (PyDict_GET_SIZE(dct) == 0)  /* Fast path */
         return _PyAccu_Accumulate(acc, empty_dict);
 
     if (s->markers != Py_None) {
@@ -1722,7 +1676,7 @@ encoder_listencode_dict(PyEncoderObject *s, _PyAccu *acc,
                 goto bail;
         }
         else if (PyLong_Check(key)) {
-            kstr = encoder_encode_long(s, key);
+            kstr = PyLong_Type.tp_str(key);
             if (kstr == NULL) {
                 goto bail;
             }

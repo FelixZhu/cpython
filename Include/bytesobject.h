@@ -74,6 +74,13 @@ PyAPI_FUNC(PyObject*) _PyBytes_FromHex(
 PyAPI_FUNC(PyObject *) PyBytes_DecodeEscape(const char *, Py_ssize_t,
 						   const char *, Py_ssize_t,
 						   const char *);
+#ifndef Py_LIMITED_API
+/* Helper for PyBytes_DecodeEscape that detects invalid escape chars. */
+PyAPI_FUNC(PyObject *) _PyBytes_DecodeEscape(const char *, Py_ssize_t,
+                                             const char *, Py_ssize_t,
+                                             const char *,
+                                             const char **);
+#endif
 
 /* Macro, trading safety for speed */
 #ifndef Py_LIMITED_API
@@ -89,7 +96,7 @@ PyAPI_FUNC(PyObject *) _PyBytes_Join(PyObject *sep, PyObject *x);
 #endif
 
 /* Provides access to the internal data buffer and size of a string
-   object or the default encoded version of an Unicode object. Passing
+   object or the default encoded version of a Unicode object. Passing
    NULL as *len parameter will force the string buffer to be
    0-terminated (passing a string with embedded NULL characters will
    cause an exception).  */
@@ -131,7 +138,7 @@ PyAPI_FUNC(Py_ssize_t) _PyBytes_InsertThousandsGrouping(char *buffer,
 #define F_ZERO	(1<<4)
 
 #ifndef Py_LIMITED_API
-/* The _PyBytesWriter structure is big: it contains an embeded "stack buffer".
+/* The _PyBytesWriter structure is big: it contains an embedded "stack buffer".
    A _PyBytesWriter variable must be declared at the end of variables in a
    function to optimize the memory allocation on the stack. */
 typedef struct {

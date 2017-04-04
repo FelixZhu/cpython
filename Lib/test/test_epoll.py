@@ -28,7 +28,6 @@ import socket
 import time
 import unittest
 
-from test import support
 if not hasattr(select, "epoll"):
     raise unittest.SkipTest("test works only on Linux 2.6")
 
@@ -77,6 +76,8 @@ class TestEPoll(unittest.TestCase):
         self.assertRaises(ValueError, ep.fileno)
         if hasattr(select, "EPOLL_CLOEXEC"):
             select.epoll(select.EPOLL_CLOEXEC).close()
+            select.epoll(flags=select.EPOLL_CLOEXEC).close()
+            select.epoll(flags=0).close()
             self.assertRaises(OSError, select.epoll, flags=12356)
 
     def test_badcreate(self):

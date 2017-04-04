@@ -3,6 +3,7 @@
 
 .. module:: token
    :synopsis: Constants representing terminal nodes of the parse tree.
+
 .. sectionauthor:: Fred L. Drake, Jr. <fdrake@acm.org>
 
 **Source code:** :source:`Lib/token.py`
@@ -107,10 +108,3 @@ The token constants are:
       Added :data:`AWAIT` and :data:`ASYNC` tokens. Starting with
       Python 3.7, "async" and "await" will be tokenized as :data:`NAME`
       tokens, and :data:`AWAIT` and :data:`ASYNC` will be removed.
-
-.. seealso::
-
-   Module :mod:`parser`
-      The second example for the :mod:`parser` module shows how to use the
-      :mod:`symbol` module.
-

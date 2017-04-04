@@ -4,10 +4,10 @@
 .. module:: logging
    :synopsis: Flexible event logging system for applications.
 
-
 .. moduleauthor:: Vinay Sajip <vinay_sajip@red-dove.com>
 .. sectionauthor:: Vinay Sajip <vinay_sajip@red-dove.com>
 
+**Source code:** :source:`Lib/logging/__init__.py`
 
 .. index:: pair: Errors; logging
 
@@ -19,9 +19,6 @@
    * :ref:`Basic Tutorial <logging-basic-tutorial>`
    * :ref:`Advanced Tutorial <logging-advanced-tutorial>`
    * :ref:`Logging Cookbook <logging-cookbook>`
-
-
-**Source code:** :source:`Lib/logging/__init__.py`
 
 --------------
 
@@ -299,7 +296,7 @@ is the module's name in the Python package namespace.
 
    Finds the caller's source filename and line number. Returns the filename, line
    number, function name and stack information as a 4-element tuple. The stack
-   information is returned as *None* unless *stack_info* is *True*.
+   information is returned as ``None`` unless *stack_info* is ``True``.
 
 
 .. method:: Logger.handle(record)
@@ -321,7 +318,7 @@ is the module's name in the Python package namespace.
    looking for handlers in this logger and its parents in the logger hierarchy.
    Returns ``True`` if a handler was found, else ``False``. The method stops searching
    up the hierarchy whenever a logger with the 'propagate' attribute set to
-   False is found - that will be the last logger which is checked for the
+   false is found - that will be the last logger which is checked for the
    existence of handlers.
 
    .. versionadded:: 3.2
@@ -564,7 +561,7 @@ The useful mapping keys in a :class:`LogRecord` are given in the section on
          handled by a strptime format string (``'%Y-%m-%d %H:%M:%S'``), and the
          part after the comma is a millisecond value. Because strptime does not
          have a format placeholder for milliseconds, the millisecond value is
-         appended using another format string, ``'%s,%03d'`` – and both of these
+         appended using another format string, ``'%s,%03d'`` --- and both of these
          format strings have been hardcoded into this method. With the change,
          these strings are defined as class-level attributes which can be
          overridden at the instance level when desired. The names of the
@@ -675,7 +672,7 @@ wire).
    :param args: Variable data to merge into the *msg* argument to obtain the
                 event description.
    :param exc_info: An exception tuple with the current exception information,
-                    or *None* if no exception information is available.
+                    or ``None`` if no exception information is available.
    :param func: The name of the function or method from which the logging call
                 was invoked.
    :param sinfo: A text string representing stack information from the base of
@@ -757,7 +754,7 @@ the options available to you.
 |                |                         | (as returned by :func:`time.time`).           |
 +----------------+-------------------------+-----------------------------------------------+
 | exc_info       | You shouldn't need to   | Exception tuple (à la ``sys.exc_info``) or,   |
-|                | format this yourself.   | if no exception has occurred, *None*.         |
+|                | format this yourself.   | if no exception has occurred, ``None``.       |
 +----------------+-------------------------+-----------------------------------------------+
 | filename       | ``%(filename)s``        | Filename portion of ``pathname``.             |
 +----------------+-------------------------+-----------------------------------------------+
@@ -1026,7 +1023,7 @@ functions.
       handlers being added multiple times to the root logger, which can in turn
       lead to multiple messages for the same event.
 
-.. function:: disable(lvl)
+.. function:: disable(lvl=CRITICAL)
 
    Provides an overriding level *lvl* for all loggers which takes precedence over
    the logger's own level. When the need arises to temporarily throttle logging
@@ -1039,6 +1036,14 @@ functions.
    overriding level, so that logging output again depends on the effective
    levels of individual loggers.
 
+   Note that if you have defined any custom logging level higher than
+   ``CRITICAL`` (this is not recommended), you won't be able to rely on the
+   default value for the *lvl* parameter, but will have to explicitly supply a
+   suitable value.
+
+   .. versionchanged:: 3.7
+      The *lvl* parameter was defaulted to level ``CRITICAL``. See Issue
+      #28524 for more information about this change.
 
 .. function:: addLevelName(lvl, levelName)
 
@@ -1190,7 +1195,7 @@ functions.
       :lno: The line number in the file where the logging call was made.
       :msg: The logging message.
       :args: The arguments for the logging message.
-      :exc_info: An exception tuple, or None.
+      :exc_info: An exception tuple, or ``None``.
       :func: The name of the function or method which invoked the logging
              call.
       :sinfo: A stack traceback such as is provided by
@@ -1246,7 +1251,7 @@ with the :mod:`warnings` module.
       The proposal which described this feature for inclusion in the Python standard
       library.
 
-   `Original Python logging package <http://www.red-dove.com/python_logging.html>`_
+   `Original Python logging package <https://www.red-dove.com/python_logging.html>`_
       This is the original source for the :mod:`logging` package.  The version of the
       package available from this site is suitable for use with Python 1.5.2, 2.1.x
       and 2.2.x, which do not include the :mod:`logging` package in the standard

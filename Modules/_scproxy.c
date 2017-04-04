@@ -64,23 +64,18 @@ get_proxy_settings(PyObject* mod __attribute__((__unused__)))
 
     proxyDict = SCDynamicStoreCopyProxies(NULL);
     if (!proxyDict) {
-        Py_INCREF(Py_None);
-        return Py_None;
+        Py_RETURN_NONE;
     }
 
     result = PyDict_New();
     if (result == NULL) goto error;
 
-    if (&kSCPropNetProxiesExcludeSimpleHostnames != NULL) {
-        aNum = CFDictionaryGetValue(proxyDict,
-            kSCPropNetProxiesExcludeSimpleHostnames);
-        if (aNum == NULL) {
-            v = PyBool_FromLong(0);
-        } else {
-            v = PyBool_FromLong(cfnum_to_int32(aNum));
-        }
-    }  else {
+    aNum = CFDictionaryGetValue(proxyDict,
+        kSCPropNetProxiesExcludeSimpleHostnames);
+    if (aNum == NULL) {
         v = PyBool_FromLong(0);
+    } else {
+        v = PyBool_FromLong(cfnum_to_int32(aNum));
     }
 
     if (v == NULL) goto error;
@@ -130,7 +125,7 @@ error:
 }
 
 static int
-set_proxy(PyObject* proxies, char* proto, CFDictionaryRef proxyDict,
+set_proxy(PyObject* proxies, const char* proto, CFDictionaryRef proxyDict,
                 CFStringRef enabledKey,
                 CFStringRef hostKey, CFStringRef portKey)
 {

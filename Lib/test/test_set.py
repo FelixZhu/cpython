@@ -6,12 +6,10 @@ import operator
 import copy
 import pickle
 from random import randrange, shuffle
-import sys
 import warnings
 import collections
 import collections.abc
 import itertools
-import string
 
 class PassThru(Exception):
     pass
@@ -364,6 +362,9 @@ class TestJointOps:
         gc.collect()
         self.assertTrue(ref() is None, "Cycle was not collected")
 
+    def test_free_after_iterating(self):
+        support.check_free_after_iterating(self, iter, self.thetype)
+
 class TestSet(TestJointOps, unittest.TestCase):
     thetype = set
     basetype = set
@@ -386,6 +387,21 @@ class TestSet(TestJointOps, unittest.TestCase):
         s = set([1,2,3])
         t = {1,2,3}
         self.assertEqual(s, t)
+
+    def test_set_literal_insertion_order(self):
+        # SF Issue #26020 -- Expect left to right insertion
+        s = {1, 1.0, True}
+        self.assertEqual(len(s), 1)
+        stored_value = s.pop()
+        self.assertEqual(type(stored_value), int)
+
+    def test_set_literal_evaluation_order(self):
+        # Expect left to right expression evaluation
+        events = []
+        def record(obj):
+            events.append(obj)
+        s = {record(1), record(2), record(3)}
+        self.assertEqual(events, [1, 2, 3])
 
     def test_hash(self):
         self.assertRaises(TypeError, hash, self.s)
@@ -713,9 +729,6 @@ class TestFrozenSet(TestJointOps, unittest.TestCase):
             addhashvalue(hash(frozenset([e for e, m in elemmasks if m&i])))
         self.assertEqual(len(hashvalues), 2**n)
 
-        def letter_range(n):
-            return string.ascii_letters[:n]
-
         def zf_range(n):
             # https://en.wikipedia.org/wiki/Set-theoretic_definition_of_natural_numbers
             nums = [frozenset()]
@@ -731,7 +744,7 @@ class TestFrozenSet(TestJointOps, unittest.TestCase):
         for n in range(18):
             t = 2 ** n
             mask = t - 1
-            for nums in (range, letter_range, zf_range):
+            for nums in (range, zf_range):
                 u = len({h & mask for h in map(hash, powerset(nums(n)))})
                 self.assertGreater(4*u, t)
 
@@ -1857,7 +1870,7 @@ class TestGraphs(unittest.TestCase):
 
         # http://en.wikipedia.org/wiki/Cuboctahedron
         # 8 triangular faces and 6 square faces
-        # 12 indentical vertices each connecting a triangle and square
+        # 12 identical vertices each connecting a triangle and square
 
         g = cube(3)
         cuboctahedron = linegraph(g)            # V( --> {V1, V2, V3, V4}

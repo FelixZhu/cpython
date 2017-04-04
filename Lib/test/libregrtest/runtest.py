@@ -7,7 +7,7 @@ import time
 import traceback
 import unittest
 from test import support
-from test.libregrtest.refleak import dash_R
+from test.libregrtest.refleak import dash_R, clear_caches
 from test.libregrtest.save_env import saved_test_environment
 
 
@@ -20,6 +20,19 @@ RESOURCE_DENIED = -3
 INTERRUPTED = -4
 CHILD_ERROR = -5   # error in a child process
 
+_FORMAT_TEST_RESULT = {
+    PASSED: '%s passed',
+    FAILED: '%s failed',
+    ENV_CHANGED: '%s failed (env changed)',
+    SKIPPED: '%s skipped',
+    RESOURCE_DENIED: '%s skipped (resource denied)',
+    INTERRUPTED: '%s interrupted',
+    CHILD_ERROR: '%s crashed',
+}
+
+# Minimum duration of a test to display its duration or to mention that
+# the test is running in background
+PROGRESS_MIN_TIME = 30.0   # seconds
 
 # small set of tests to determine if we have a basically functioning interpreter
 # (i.e. if any of these fail, then anything else is likely to follow)
@@ -40,6 +53,11 @@ STDTESTS = [
 NOTTESTS = set()
 
 
+def format_test_result(test_name, result):
+    fmt = _FORMAT_TEST_RESULT.get(result, "%s")
+    return fmt % test_name
+
+
 def findtests(testdir=None, stdtests=STDTESTS, nottests=NOTTESTS):
     """Return a list of all applicable test modules."""
     testdir = findtestdir(testdir)
@@ -56,18 +74,12 @@ def findtests(testdir=None, stdtests=STDTESTS, nottests=NOTTESTS):
 def runtest(ns, test):
     """Run a single test.
 
+    ns -- regrtest namespace of options
     test -- the name of the test
-    verbose -- if true, print more messages
-    quiet -- if true, don't print 'skipped' messages (probably redundant)
-    huntrleaks -- run multiple times to test for leaks; requires a debug
-                  build; a triple corresponding to -R's three arguments
-    output_on_failure -- if true, display test output on failure
-    timeout -- dump the traceback and exit if a test takes more than
-               timeout seconds
-    failfast, match_tests -- See regrtest command-line flags for these.
-    pgo -- if true, suppress any info irrelevant to a generating a PGO build
 
-    Returns the tuple result, test_time, where result is one of the constants:
+    Returns the tuple (result, test_time), where result is one of the
+    constants:
+
         INTERRUPTED      KeyboardInterrupt when run under -j
         RESOURCE_DENIED  test skipped because resource denied
         SKIPPED          test skipped for some other reason
@@ -76,21 +88,14 @@ def runtest(ns, test):
         PASSED           test passed
     """
 
-    verbose = ns.verbose
-    quiet = ns.quiet
-    huntrleaks = ns.huntrleaks
     output_on_failure = ns.verbose3
-    failfast = ns.failfast
-    match_tests = ns.match_tests
-    timeout = ns.timeout
-    pgo = ns.pgo
 
-    use_timeout = (timeout is not None)
+    use_timeout = (ns.timeout is not None)
     if use_timeout:
-        faulthandler.dump_traceback_later(timeout, exit=True)
+        faulthandler.dump_traceback_later(ns.timeout, exit=True)
     try:
-        support.match_tests = match_tests
-        if failfast:
+        support.match_tests = ns.match_tests
+        if ns.failfast:
             support.failfast = True
         if output_on_failure:
             support.verbose = True
@@ -111,9 +116,8 @@ def runtest(ns, test):
             try:
                 sys.stdout = stream
                 sys.stderr = stream
-                result = runtest_inner(test, verbose, quiet, huntrleaks,
-                                       display_failure=False, pgo=pgo)
-                if result[0] == FAILED:
+                result = runtest_inner(ns, test, display_failure=False)
+                if result[0] != PASSED:
                     output = stream.getvalue()
                     orig_stderr.write(output)
                     orig_stderr.flush()
@@ -121,30 +125,29 @@ def runtest(ns, test):
                 sys.stdout = orig_stdout
                 sys.stderr = orig_stderr
         else:
-            support.verbose = verbose  # Tell tests to be moderately quiet
-            result = runtest_inner(test, verbose, quiet, huntrleaks,
-                                   display_failure=not verbose, pgo=pgo)
+            support.verbose = ns.verbose  # Tell tests to be moderately quiet
+            result = runtest_inner(ns, test, display_failure=not ns.verbose)
         return result
     finally:
         if use_timeout:
             faulthandler.cancel_dump_traceback_later()
-        cleanup_test_droppings(test, verbose)
+        cleanup_test_droppings(test, ns.verbose)
 runtest.stringio = None
 
 
-def runtest_inner(test, verbose, quiet,
-                  huntrleaks=False, display_failure=True, *, pgo=False):
+def runtest_inner(ns, test, display_failure=True):
     support.unload(test)
 
     test_time = 0.0
     refleak = False  # True if the test leaked references.
     try:
-        if test.startswith('test.'):
+        if test.startswith('test.') or ns.testdir:
             abstest = test
         else:
             # Always import it from the test package
             abstest = 'test.' + test
-        with saved_test_environment(test, verbose, quiet, pgo=pgo) as environment:
+        clear_caches()
+        with saved_test_environment(test, ns.verbose, ns.quiet, pgo=ns.pgo) as environment:
             start_time = time.time()
             the_module = importlib.import_module(abstest)
             # If the test has a test_main, that will run the appropriate
@@ -160,21 +163,21 @@ def runtest_inner(test, verbose, quiet,
                         raise Exception("errors while loading tests")
                     support.run_unittest(tests)
             test_runner()
-            if huntrleaks:
-                refleak = dash_R(the_module, test, test_runner, huntrleaks)
+            if ns.huntrleaks:
+                refleak = dash_R(the_module, test, test_runner, ns.huntrleaks)
             test_time = time.time() - start_time
     except support.ResourceDenied as msg:
-        if not quiet and not pgo:
+        if not ns.quiet and not ns.pgo:
             print(test, "skipped --", msg, flush=True)
         return RESOURCE_DENIED, test_time
     except unittest.SkipTest as msg:
-        if not quiet and not pgo:
+        if not ns.quiet and not ns.pgo:
             print(test, "skipped --", msg, flush=True)
         return SKIPPED, test_time
     except KeyboardInterrupt:
         raise
     except support.TestFailed as msg:
-        if not pgo:
+        if not ns.pgo:
             if display_failure:
                 print("test", test, "failed --", msg, file=sys.stderr,
                       flush=True)
@@ -183,7 +186,7 @@ def runtest_inner(test, verbose, quiet,
         return FAILED, test_time
     except:
         msg = traceback.format_exc()
-        if not pgo:
+        if not ns.pgo:
             print("test", test, "crashed --", msg, file=sys.stderr,
                   flush=True)
         return FAILED, test_time

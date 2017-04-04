@@ -22,7 +22,7 @@ descr_name(PyDescrObject *descr)
 }
 
 static PyObject *
-descr_repr(PyDescrObject *descr, char *format)
+descr_repr(PyDescrObject *descr, const char *format)
 {
     PyObject *name = NULL;
     if (descr->d_name != NULL && PyUnicode_Check(descr->d_name))
@@ -210,15 +210,15 @@ getset_set(PyGetSetDescrObject *descr, PyObject *obj, PyObject *value)
 }
 
 static PyObject *
-methoddescr_call(PyMethodDescrObject *descr, PyObject *args, PyObject *kwds)
+methoddescr_call(PyMethodDescrObject *descr, PyObject *args, PyObject *kwargs)
 {
-    Py_ssize_t argc;
-    PyObject *self, *func, *result;
+    Py_ssize_t nargs;
+    PyObject *self, *result;
 
     /* Make sure that the first argument is acceptable as 'self' */
     assert(PyTuple_Check(args));
-    argc = PyTuple_GET_SIZE(args);
-    if (argc < 1) {
+    nargs = PyTuple_GET_SIZE(args);
+    if (nargs < 1) {
         PyErr_Format(PyExc_TypeError,
                      "descriptor '%V' of '%.100s' "
                      "object needs an argument",
@@ -239,17 +239,48 @@ methoddescr_call(PyMethodDescrObject *descr, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    func = PyCFunction_NewEx(descr->d_method, self, NULL);
-    if (func == NULL)
-        return NULL;
-    args = PyTuple_GetSlice(args, 1, argc);
-    if (args == NULL) {
-        Py_DECREF(func);
+    result = _PyMethodDef_RawFastCallDict(descr->d_method, self,
+                                          &PyTuple_GET_ITEM(args, 1), nargs - 1,
+                                          kwargs);
+    result = _Py_CheckFunctionResult((PyObject *)descr, result, NULL);
+    return result;
+}
+
+// same to methoddescr_call(), but use FASTCALL convention.
+PyObject *
+_PyMethodDescr_FastCallKeywords(PyObject *descrobj,
+                                PyObject **args, Py_ssize_t nargs,
+                                PyObject *kwnames)
+{
+    assert(Py_TYPE(descrobj) == &PyMethodDescr_Type);
+    PyMethodDescrObject *descr = (PyMethodDescrObject *)descrobj;
+    PyObject *self, *result;
+
+    /* Make sure that the first argument is acceptable as 'self' */
+    if (nargs < 1) {
+        PyErr_Format(PyExc_TypeError,
+                     "descriptor '%V' of '%.100s' "
+                     "object needs an argument",
+                     descr_name((PyDescrObject *)descr), "?",
+                     PyDescr_TYPE(descr)->tp_name);
         return NULL;
     }
-    result = PyEval_CallObjectWithKeywords(func, args, kwds);
-    Py_DECREF(args);
-    Py_DECREF(func);
+    self = args[0];
+    if (!_PyObject_RealIsSubclass((PyObject *)Py_TYPE(self),
+                                  (PyObject *)PyDescr_TYPE(descr))) {
+        PyErr_Format(PyExc_TypeError,
+                     "descriptor '%V' "
+                     "requires a '%.100s' object "
+                     "but received a '%.100s'",
+                     descr_name((PyDescrObject *)descr), "?",
+                     PyDescr_TYPE(descr)->tp_name,
+                     self->ob_type->tp_name);
+        return NULL;
+    }
+
+    result = _PyMethodDef_RawFastCallKeywords(descr->d_method, self,
+                                              args+1, nargs-1, kwnames);
+    result = _Py_CheckFunctionResult((PyObject *)descr, result, NULL);
     return result;
 }
 
@@ -258,7 +289,7 @@ classmethoddescr_call(PyMethodDescrObject *descr, PyObject *args,
                       PyObject *kwds)
 {
     Py_ssize_t argc;
-    PyObject *self, *func, *result;
+    PyObject *self, *func, *result, **stack;
 
     /* Make sure that the first argument is acceptable as 'self' */
     assert(PyTuple_Check(args));
@@ -295,14 +326,9 @@ classmethoddescr_call(PyMethodDescrObject *descr, PyObject *args,
     func = PyCFunction_NewEx(descr->d_method, self, NULL);
     if (func == NULL)
         return NULL;
-    args = PyTuple_GetSlice(args, 1, argc);
-    if (args == NULL) {
-        Py_DECREF(func);
-        return NULL;
-    }
-    result = PyEval_CallObjectWithKeywords(func, args, kwds);
+    stack = &PyTuple_GET_ITEM(args, 1);
+    result = _PyObject_FastCallDict(func, stack, argc - 1, kwds);
     Py_DECREF(func);
-    Py_DECREF(args);
     return result;
 }
 
@@ -310,7 +336,7 @@ static PyObject *
 wrapperdescr_call(PyWrapperDescrObject *descr, PyObject *args, PyObject *kwds)
 {
     Py_ssize_t argc;
-    PyObject *self, *func, *result;
+    PyObject *self, *func, *result, **stack;
 
     /* Make sure that the first argument is acceptable as 'self' */
     assert(PyTuple_Check(args));
@@ -339,13 +365,9 @@ wrapperdescr_call(PyWrapperDescrObject *descr, PyObject *args, PyObject *kwds)
     func = PyWrapper_New((PyObject *)descr, self);
     if (func == NULL)
         return NULL;
-    args = PyTuple_GetSlice(args, 1, argc);
-    if (args == NULL) {
-        Py_DECREF(func);
-        return NULL;
-    }
-    result = PyEval_CallObjectWithKeywords(func, args, kwds);
-    Py_DECREF(args);
+
+    stack = &PyTuple_GET_ITEM(args, 1);
+    result = _PyObject_FastCallDict(func, stack, argc - 1, kwds);
     Py_DECREF(func);
     return result;
 }
@@ -435,8 +457,7 @@ static PyObject *
 member_get_doc(PyMemberDescrObject *descr, void *closure)
 {
     if (descr->d_member->doc == NULL) {
-        Py_INCREF(Py_None);
-        return Py_None;
+        Py_RETURN_NONE;
     }
     return PyUnicode_FromString(descr->d_member->doc);
 }
@@ -451,8 +472,7 @@ static PyObject *
 getset_get_doc(PyGetSetDescrObject *descr, void *closure)
 {
     if (descr->d_getset->doc == NULL) {
-        Py_INCREF(Py_None);
-        return Py_None;
+        Py_RETURN_NONE;
     }
     return PyUnicode_FromString(descr->d_getset->doc);
 }
@@ -818,7 +838,8 @@ mappingproxy_get(mappingproxyobject *pp, PyObject *args)
 
     if (!PyArg_UnpackTuple(args, "get", 1, 2, &key, &def))
         return NULL;
-    return _PyObject_CallMethodId(pp->mapping, &PyId_get, "(OO)", key, def);
+    return _PyObject_CallMethodIdObjArgs(pp->mapping, &PyId_get,
+                                         key, def, NULL);
 }
 
 static PyObject *
@@ -1033,7 +1054,7 @@ wrapper_dealloc(wrapperobject *wp)
 static PyObject *
 wrapper_richcompare(PyObject *a, PyObject *b, int op)
 {
-    Py_intptr_t result;
+    intptr_t result;
     PyObject *v;
     PyWrapperDescrObject *a_descr, *b_descr;
 
@@ -1186,7 +1207,7 @@ wrapper_call(wrapperobject *wp, PyObject *args, PyObject *kwds)
         return (*wk)(self, args, wp->descr->d_wrapped, kwds);
     }
 
-    if (kwds != NULL && (!PyDict_Check(kwds) || PyDict_Size(kwds) != 0)) {
+    if (kwds != NULL && (!PyDict_Check(kwds) || PyDict_GET_SIZE(kwds) != 0)) {
         PyErr_Format(PyExc_TypeError,
                      "wrapper %s doesn't take keyword arguments",
                      wp->descr->d_base->name);
@@ -1386,27 +1407,27 @@ property_descr_get(PyObject *self, PyObject *obj, PyObject *type)
         return NULL;
     }
     args = cached_args;
-    if (!args || Py_REFCNT(args) != 1) {
-        Py_CLEAR(cached_args);
-        if (!(cached_args = args = PyTuple_New(1)))
+    cached_args = NULL;
+    if (!args) {
+        args = PyTuple_New(1);
+        if (!args)
             return NULL;
+        _PyObject_GC_UNTRACK(args);
     }
-    Py_INCREF(args);
-    assert (Py_REFCNT(args) == 2);
     Py_INCREF(obj);
     PyTuple_SET_ITEM(args, 0, obj);
     ret = PyObject_Call(gs->prop_get, args, NULL);
-    if (args == cached_args) {
-        if (Py_REFCNT(args) == 2) {
-            obj = PyTuple_GET_ITEM(args, 0);
-            PyTuple_SET_ITEM(args, 0, NULL);
-            Py_XDECREF(obj);
-        }
-        else {
-            Py_CLEAR(cached_args);
-        }
+    if (cached_args == NULL && Py_REFCNT(args) == 1) {
+        assert(Py_SIZE(args) == 1);
+        assert(PyTuple_GET_ITEM(args, 0) == obj);
+        cached_args = args;
+        Py_DECREF(obj);
     }
-    Py_DECREF(args);
+    else {
+        assert(Py_REFCNT(args) >= 1);
+        _PyObject_GC_TRACK(args);
+        Py_DECREF(args);
+    }
     return ret;
 }
 
@@ -1467,7 +1488,7 @@ property_copy(PyObject *old, PyObject *get, PyObject *set, PyObject *del)
         doc = pold->prop_doc ? pold->prop_doc : Py_None;
     }
 
-    new =  PyObject_CallFunction(type, "OOOO", get, set, del, doc);
+    new =  PyObject_CallFunctionObjArgs(type, get, set, del, doc, NULL);
     Py_DECREF(type);
     if (new == NULL)
         return NULL;
@@ -1509,8 +1530,7 @@ property_init(PyObject *self, PyObject *args, PyObject *kwds)
         PyObject *get_doc = _PyObject_GetAttrId(get, &PyId___doc__);
         if (get_doc) {
             if (Py_TYPE(self) == &PyProperty_Type) {
-                Py_XDECREF(prop->prop_doc);
-                prop->prop_doc = get_doc;
+                Py_XSETREF(prop->prop_doc, get_doc);
             }
             else {
                 /* If this is a property subclass, put __doc__

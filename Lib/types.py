@@ -24,12 +24,21 @@ _c = _c()
 CoroutineType = type(_c)
 _c.close()  # Prevent ResourceWarning
 
+async def _ag():
+    yield
+_ag = _ag()
+AsyncGeneratorType = type(_ag)
+
 class _C:
     def _m(self): pass
 MethodType = type(_C()._m)
 
 BuiltinFunctionType = type(len)
 BuiltinMethodType = type([].append)     # Same as BuiltinFunctionType
+
+SlotWrapperType = type(object.__init__)
+MethodWrapperType = type(object().__str__)
+MethodDescriptorType = type(str.join)
 
 ModuleType = type(sys)
 

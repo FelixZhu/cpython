@@ -1942,15 +1942,15 @@ class AbstractPickleTests(unittest.TestCase):
                 # 5th item is not an iterator
                 return dict, (), None, None, []
 
-        # Protocol 0 is less strict and also accept iterables.
+        # Python implementation is less strict and also accepts iterables.
         for proto in protocols:
             try:
                 self.dumps(C(), proto)
-            except (pickle.PickleError):
+            except pickle.PicklingError:
                 pass
             try:
                 self.dumps(D(), proto)
-            except (pickle.PickleError):
+            except pickle.PicklingError:
                 pass
 
     def test_many_puts_and_gets(self):
@@ -2446,7 +2446,7 @@ class REX_six(object):
     def __init__(self, items=None):
         self.items = items if items is not None else []
     def __eq__(self, other):
-        return type(self) is type(other) and self.items == self.items
+        return type(self) is type(other) and self.items == other.items
     def append(self, item):
         self.items.append(item)
     def __reduce__(self):
@@ -2459,7 +2459,7 @@ class REX_seven(object):
     def __init__(self, table=None):
         self.table = table if table is not None else {}
     def __eq__(self, other):
-        return type(self) is type(other) and self.table == self.table
+        return type(self) is type(other) and self.table == other.table
     def __setitem__(self, key, value):
         self.table[key] = value
     def __reduce__(self):
@@ -2620,6 +2620,35 @@ class AbstractPersistentPicklerTests(unittest.TestCase):
             self.assertEqual(self.false_count, 1)
             self.assertEqual(self.load_count, 5)
             self.assertEqual(self.load_false_count, 1)
+
+
+class AbstractIdentityPersistentPicklerTests(unittest.TestCase):
+
+    def persistent_id(self, obj):
+        return obj
+
+    def persistent_load(self, pid):
+        return pid
+
+    def _check_return_correct_type(self, obj, proto):
+        unpickled = self.loads(self.dumps(obj, proto))
+        self.assertIsInstance(unpickled, type(obj))
+        self.assertEqual(unpickled, obj)
+
+    def test_return_correct_type(self):
+        for proto in protocols:
+            # Protocol 0 supports only ASCII strings.
+            if proto == 0:
+                self._check_return_correct_type("abc", 0)
+            else:
+                for obj in [b"abc\n", "abc\n", -1, -1.1 * 0.1, str]:
+                    self._check_return_correct_type(obj, proto)
+
+    def test_protocol0_is_ascii_only(self):
+        non_ascii_str = "\N{EMPTY SET}"
+        self.assertRaises(pickle.PicklingError, self.dumps, non_ascii_str, 0)
+        pickled = pickle.PERSID + non_ascii_str.encode('utf-8') + b'\n.'
+        self.assertRaises(pickle.UnpicklingError, self.loads, pickled)
 
 
 class AbstractPicklerUnpicklerObjectTests(unittest.TestCase):

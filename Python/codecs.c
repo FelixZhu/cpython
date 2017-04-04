@@ -284,7 +284,7 @@ PyObject *codec_makeincrementalcodec(PyObject *codec_info,
     if (errors)
         ret = PyObject_CallFunction(inccodec, "s", errors);
     else
-        ret = PyObject_CallFunction(inccodec, NULL);
+        ret = _PyObject_CallNoArg(inccodec);
     Py_DECREF(inccodec);
     return ret;
 }
@@ -322,7 +322,7 @@ PyObject *codec_getstreamcodec(const char *encoding,
     if (errors != NULL)
         streamcodec = PyObject_CallFunction(codeccls, "Os", stream, errors);
     else
-        streamcodec = PyObject_CallFunction(codeccls, "O", stream);
+        streamcodec = PyObject_CallFunctionObjArgs(codeccls, stream, NULL);
     Py_DECREF(codecs);
     return streamcodec;
 }
@@ -403,7 +403,7 @@ wrap_codec_error(const char *operation,
                            operation, encoding);
 }
 
-/* Encode an object (e.g. an Unicode object) using the given encoding
+/* Encode an object (e.g. a Unicode object) using the given encoding
    and return the resulting encoded object (usually a Python string).
 
    errors is passed to the encoder factory as argument if non-NULL. */
@@ -450,7 +450,7 @@ _PyCodec_EncodeInternal(PyObject *object,
 }
 
 /* Decode an object (usually a Python string) using the given encoding
-   and return an equivalent object (e.g. an Unicode object).
+   and return an equivalent object (e.g. a Unicode object).
 
    errors is passed to the decoder factory as argument if non-NULL. */
 
@@ -867,17 +867,14 @@ PyObject *PyCodec_BackslashReplaceErrors(PyObject *exc)
     Py_UCS4 c;
 
     if (PyObject_TypeCheck(exc, (PyTypeObject *)PyExc_UnicodeDecodeError)) {
-        unsigned char *p;
+        const unsigned char *p;
         if (PyUnicodeDecodeError_GetStart(exc, &start))
             return NULL;
         if (PyUnicodeDecodeError_GetEnd(exc, &end))
             return NULL;
         if (!(object = PyUnicodeDecodeError_GetObject(exc)))
             return NULL;
-        if (!(p = (unsigned char*)PyBytes_AsString(object))) {
-            Py_DECREF(object);
-            return NULL;
-        }
+        p = (const unsigned char*)PyBytes_AS_STRING(object);
         res = PyUnicode_New(4 * (end - start), 127);
         if (res == NULL) {
             Py_DECREF(object);
@@ -1134,7 +1131,7 @@ PyCodec_SurrogatePassErrors(PyObject *exc)
     PyObject *restuple;
     PyObject *object;
     PyObject *encode;
-    char *encoding;
+    const char *encoding;
     int code;
     int bytelength;
     Py_ssize_t i;
@@ -1220,7 +1217,7 @@ PyCodec_SurrogatePassErrors(PyObject *exc)
         return restuple;
     }
     else if (PyObject_TypeCheck(exc, (PyTypeObject *)PyExc_UnicodeDecodeError)) {
-        unsigned char *p;
+        const unsigned char *p;
         Py_UCS4 ch = 0;
         if (PyUnicodeDecodeError_GetStart(exc, &start))
             return NULL;
@@ -1228,10 +1225,7 @@ PyCodec_SurrogatePassErrors(PyObject *exc)
             return NULL;
         if (!(object = PyUnicodeDecodeError_GetObject(exc)))
             return NULL;
-        if (!(p = (unsigned char*)PyBytes_AsString(object))) {
-            Py_DECREF(object);
-            return NULL;
-        }
+        p = (const unsigned char*)PyBytes_AS_STRING(object);
         if (!(encode = PyUnicodeDecodeError_GetEncoding(exc))) {
             Py_DECREF(object);
             return NULL;
@@ -1338,7 +1332,7 @@ PyCodec_SurrogateEscapeErrors(PyObject *exc)
     }
     else if (PyObject_TypeCheck(exc, (PyTypeObject *)PyExc_UnicodeDecodeError)) {
         PyObject *str;
-        unsigned char *p;
+        const unsigned char *p;
         Py_UCS2 ch[4]; /* decode up to 4 bad bytes. */
         int consumed = 0;
         if (PyUnicodeDecodeError_GetStart(exc, &start))
@@ -1347,10 +1341,7 @@ PyCodec_SurrogateEscapeErrors(PyObject *exc)
             return NULL;
         if (!(object = PyUnicodeDecodeError_GetObject(exc)))
             return NULL;
-        if (!(p = (unsigned char*)PyBytes_AsString(object))) {
-            Py_DECREF(object);
-            return NULL;
-        }
+        p = (const unsigned char*)PyBytes_AS_STRING(object);
         while (consumed < 4 && consumed < end-start) {
             /* Refuse to escape ASCII bytes. */
             if (p[start+consumed] < 128)

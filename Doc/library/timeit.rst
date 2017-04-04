@@ -4,17 +4,16 @@
 .. module:: timeit
    :synopsis: Measure the execution time of small code snippets.
 
+**Source code:** :source:`Lib/timeit.py`
 
 .. index::
    single: Benchmarking
    single: Performance
 
-**Source code:** :source:`Lib/timeit.py`
-
 --------------
 
 This module provides a simple way to time small bits of Python code. It has both
-a :ref:`command-line-interface` as well as a :ref:`callable <python-interface>`
+a :ref:`timeit-command-line-interface` as well as a :ref:`callable <python-interface>`
 one.  It avoids a number of common traps for measuring execution times.
 See also Tim Peters' introduction to the "Algorithms" chapter in the *Python
 Cookbook*, published by O'Reilly.
@@ -23,17 +22,17 @@ Cookbook*, published by O'Reilly.
 Basic Examples
 --------------
 
-The following example shows how the :ref:`command-line-interface`
+The following example shows how the :ref:`timeit-command-line-interface`
 can be used to compare three different expressions:
 
 .. code-block:: sh
 
    $ python3 -m timeit '"-".join(str(n) for n in range(100))'
-   10000 loops, best of 3: 30.2 usec per loop
+   10000 loops, best of 5: 30.2 usec per loop
    $ python3 -m timeit '"-".join([str(n) for n in range(100)])'
-   10000 loops, best of 3: 27.5 usec per loop
+   10000 loops, best of 5: 27.5 usec per loop
    $ python3 -m timeit '"-".join(map(str, range(100)))'
-   10000 loops, best of 3: 23.2 usec per loop
+   10000 loops, best of 5: 23.2 usec per loop
 
 This can be achieved from the :ref:`python-interface` with::
 
@@ -101,8 +100,8 @@ The module defines three convenience functions and a public class:
    can be controlled by passing a namespace to *globals*.
 
    To measure the execution time of the first statement, use the :meth:`.timeit`
-   method.  The :meth:`.repeat` method is a convenience to call :meth:`.timeit`
-   multiple times and return a list of results.
+   method.  The :meth:`.repeat` and :meth:`.autorange` methods are convenience
+   methods to call :meth:`.timeit` multiple times.
 
    The execution time of *setup* is excluded from the overall timed execution run.
 
@@ -133,6 +132,22 @@ The module defines three convenience functions and a public class:
          statement in the *setup* string.  For example::
 
             timeit.Timer('for i in range(10): oct(i)', 'gc.enable()').timeit()
+
+
+    .. method:: Timer.autorange(callback=None)
+
+       Automatically determine how many times to call :meth:`.timeit`.
+
+       This is a convenience function that calls :meth:`.timeit` repeatedly
+       so that the total time >= 0.2 second, returning the eventual
+       (number of loops, time taken for that number of loops). It calls
+       :meth:`.timeit` with increasing numbers from the sequence 1, 2, 5,
+       10, 20, 50, ... until the time taken is at least 0.2 second.
+
+        If *callback* is given and is not ``None``, it will be called after
+        each trial with two arguments: ``callback(number, time_taken)``.
+
+        .. versionadded:: 3.6
 
 
    .. method:: Timer.repeat(repeat=3, number=1000000)
@@ -174,14 +189,14 @@ The module defines three convenience functions and a public class:
       where the traceback is sent; it defaults to :data:`sys.stderr`.
 
 
-.. _command-line-interface:
+.. _timeit-command-line-interface:
 
 Command-Line Interface
 ----------------------
 
 When called as a program from the command line, the following form is used::
 
-   python -m timeit [-n N] [-r N] [-u U] [-s S] [-t] [-c] [-h] [statement ...]
+   python -m timeit [-n N] [-r N] [-u U] [-s S] [-h] [statement ...]
 
 Where the following options are understood:
 
@@ -206,19 +221,11 @@ Where the following options are understood:
 
    .. versionadded:: 3.3
 
-.. cmdoption:: -t, --time
-
-   use :func:`time.time` (deprecated)
-
 .. cmdoption:: -u, --unit=U
 
-    specify a time unit for timer output; can select usec, msec, or sec
+    specify a time unit for timer output; can select nsec, usec, msec, or sec
 
    .. versionadded:: 3.5
-
-.. cmdoption:: -c, --clock
-
-   use :func:`time.clock` (deprecated)
 
 .. cmdoption:: -v, --verbose
 
@@ -260,9 +267,9 @@ It is possible to provide a setup statement that is executed only once at the be
 .. code-block:: sh
 
    $ python -m timeit -s 'text = "sample string"; char = "g"'  'char in text'
-   10000000 loops, best of 3: 0.0877 usec per loop
+   5000000 loops, best of 5: 0.0877 usec per loop
    $ python -m timeit -s 'text = "sample string"; char = "g"'  'text.find(char)'
-   1000000 loops, best of 3: 0.342 usec per loop
+   1000000 loops, best of 5: 0.342 usec per loop
 
 ::
 
@@ -289,14 +296,14 @@ to test for missing and present object attributes:
 .. code-block:: sh
 
    $ python -m timeit 'try:' '  str.__bool__' 'except AttributeError:' '  pass'
-   100000 loops, best of 3: 15.7 usec per loop
+   20000 loops, best of 5: 15.7 usec per loop
    $ python -m timeit 'if hasattr(str, "__bool__"): pass'
-   100000 loops, best of 3: 4.26 usec per loop
+   50000 loops, best of 5: 4.26 usec per loop
 
    $ python -m timeit 'try:' '  int.__bool__' 'except AttributeError:' '  pass'
-   1000000 loops, best of 3: 1.43 usec per loop
+   200000 loops, best of 5: 1.43 usec per loop
    $ python -m timeit 'if hasattr(int, "__bool__"): pass'
-   100000 loops, best of 3: 2.23 usec per loop
+   100000 loops, best of 5: 2.23 usec per loop
 
 ::
 

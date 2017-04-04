@@ -31,9 +31,13 @@
 #endif
 
 #include <sys/ioctl.h>
+#ifdef __ANDROID__
+#include <linux/soundcard.h>
+#else
 #include <sys/soundcard.h>
+#endif
 
-#if defined(linux)
+#ifdef __linux__
 
 #ifndef HAVE_STDINT_H
 typedef unsigned long uint32_t;
@@ -303,8 +307,7 @@ _do_ioctl_0(int fd, PyObject *args, char *fname, int cmd)
 
     if (rv == -1)
         return PyErr_SetFromErrno(PyExc_IOError);
-    Py_INCREF(Py_None);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 
@@ -322,8 +325,7 @@ oss_nonblock(oss_audio_t *self, PyObject *unused)
        mode once we're in non-blocking mode! */
     if (ioctl(self->fd, SNDCTL_DSP_NONBLOCK, NULL) == -1)
         return PyErr_SetFromErrno(PyExc_IOError);
-    Py_INCREF(Py_None);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -510,8 +512,7 @@ oss_writeall(oss_audio_t *self, PyObject *args)
         cp += rv;
     }
     PyBuffer_Release(&data);
-    Py_INCREF(Py_None);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -523,8 +524,7 @@ oss_close(oss_audio_t *self, PyObject *unused)
         Py_END_ALLOW_THREADS
         self->fd = -1;
     }
-    Py_INCREF(Py_None);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -743,8 +743,7 @@ oss_mixer_close(oss_mixer_t *self, PyObject *unused)
         close(self->fd);
         self->fd = -1;
     }
-    Py_INCREF(Py_None);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -925,11 +924,14 @@ static PyMethodDef oss_mixer_methods[] = {
 static PyObject *
 oss_getattro(oss_audio_t *self, PyObject *nameobj)
 {
-    char *name = "";
+    const char *name = "";
     PyObject * rval = NULL;
 
-    if (PyUnicode_Check(nameobj))
-        name = _PyUnicode_AsString(nameobj);
+    if (PyUnicode_Check(nameobj)) {
+        name = PyUnicode_AsUTF8(nameobj);
+        if (name == NULL)
+            return NULL;
+    }
 
     if (strcmp(name, "closed") == 0) {
         rval = (self->fd == -1) ? Py_True : Py_False;

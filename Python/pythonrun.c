@@ -154,7 +154,7 @@ PyRun_InteractiveOneObject(FILE *fp, PyObject *filename, PyCompilerFlags *flags)
     PyObject *m, *d, *v, *w, *oenc = NULL, *mod_name;
     mod_ty mod;
     PyArena *arena;
-    char *ps1 = "", *ps2 = "", *enc = NULL;
+    const char *ps1 = "", *ps2 = "", *enc = NULL;
     int errcode = 0;
     _Py_IDENTIFIER(encoding);
     _Py_IDENTIFIER(__main__);
@@ -171,7 +171,7 @@ PyRun_InteractiveOneObject(FILE *fp, PyObject *filename, PyCompilerFlags *flags)
         if (v && v != Py_None) {
             oenc = _PyObject_GetAttrId(v, &PyId_encoding);
             if (oenc)
-                enc = _PyUnicode_AsString(oenc);
+                enc = PyUnicode_AsUTF8(oenc);
             if (!enc)
                 PyErr_Clear();
         }
@@ -182,7 +182,7 @@ PyRun_InteractiveOneObject(FILE *fp, PyObject *filename, PyCompilerFlags *flags)
         if (v == NULL)
             PyErr_Clear();
         else if (PyUnicode_Check(v)) {
-            ps1 = _PyUnicode_AsString(v);
+            ps1 = PyUnicode_AsUTF8(v);
             if (ps1 == NULL) {
                 PyErr_Clear();
                 ps1 = "";
@@ -195,7 +195,7 @@ PyRun_InteractiveOneObject(FILE *fp, PyObject *filename, PyCompilerFlags *flags)
         if (w == NULL)
             PyErr_Clear();
         else if (PyUnicode_Check(w)) {
-            ps2 = _PyUnicode_AsString(w);
+            ps2 = PyUnicode_AsUTF8(w);
             if (ps2 == NULL) {
                 PyErr_Clear();
                 ps2 = "";
@@ -511,10 +511,10 @@ PyErr_Print(void)
 static void
 print_error_text(PyObject *f, int offset, PyObject *text_obj)
 {
-    char *text;
-    char *nl;
+    const char *text;
+    const char *nl;
 
-    text = _PyUnicode_AsString(text_obj);
+    text = PyUnicode_AsUTF8(text_obj);
     if (text == NULL)
         return;
 
@@ -528,7 +528,7 @@ print_error_text(PyObject *f, int offset, PyObject *text_obj)
             offset -= (int)(nl+1-text);
             text = nl+1;
         }
-        while (*text == ' ' || *text == '\t') {
+        while (*text == ' ' || *text == '\t' || *text == '\f') {
             text++;
             offset--;
         }
@@ -630,8 +630,13 @@ PyErr_PrintEx(int set_sys_last_vars)
     }
     hook = _PySys_GetObjectId(&PyId_excepthook);
     if (hook) {
-        PyObject *args = PyTuple_Pack(3, exception, v, tb);
-        PyObject *result = PyEval_CallObject(hook, args);
+        PyObject* stack[3];
+        PyObject *result;
+
+        stack[0] = exception;
+        stack[1] = v;
+        stack[2] = tb;
+        result = _PyObject_FastCall(hook, stack, 3);
         if (result == NULL) {
             PyObject *exception2, *v2, *tb2;
             if (PyErr_ExceptionMatches(PyExc_SystemExit)) {
@@ -660,7 +665,6 @@ PyErr_PrintEx(int set_sys_last_vars)
             Py_XDECREF(tb2);
         }
         Py_XDECREF(result);
-        Py_XDECREF(args);
     } else {
         PySys_WriteStderr("sys.excepthook is missing\n");
         PyErr_Display(exception, v, tb);
@@ -747,7 +751,7 @@ print_exception(PyObject *f, PyObject *value)
             err = PyFile_WriteString("<unknown>", f);
         }
         else {
-            if (_PyUnicode_CompareWithId(moduleName, &PyId_builtins) != 0)
+            if (!_PyUnicode_EqualToASCIIId(moduleName, &PyId_builtins))
             {
                 err = PyFile_WriteObject(moduleName, f, Py_PRINT_RAW);
                 err += PyFile_WriteString(".", f);
@@ -766,8 +770,11 @@ print_exception(PyObject *f, PyObject *value)
         /* only print colon if the str() of the
            object is not the empty string
         */
-        if (s == NULL)
+        if (s == NULL) {
+            PyErr_Clear();
             err = -1;
+            PyFile_WriteString(": <exception str() failed>", f);
+        }
         else if (!PyUnicode_Check(s) ||
             PyUnicode_GetLength(s) != 0)
             err = PyFile_WriteString(": ", f);
@@ -776,6 +783,9 @@ print_exception(PyObject *f, PyObject *value)
         Py_XDECREF(s);
     }
     /* try to write a newline in any case */
+    if (err < 0) {
+        PyErr_Clear();
+    }
     err += PyFile_WriteString("\n", f);
     Py_XDECREF(tb);
     Py_DECREF(value);
@@ -785,11 +795,11 @@ print_exception(PyObject *f, PyObject *value)
         PyErr_Clear();
 }
 
-static const char *cause_message =
+static const char cause_message[] =
     "\nThe above exception was the direct cause "
     "of the following exception:\n\n";
 
-static const char *context_message =
+static const char context_message[] =
     "\nDuring handling of the above exception, "
     "another exception occurred:\n\n";
 
@@ -940,7 +950,7 @@ flush_io(void)
 
     f = _PySys_GetObjectId(&PyId_stderr);
     if (f != NULL) {
-        r = _PyObject_CallMethodId(f, &PyId_flush, "");
+        r = _PyObject_CallMethodId(f, &PyId_flush, NULL);
         if (r)
             Py_DECREF(r);
         else
@@ -948,7 +958,7 @@ flush_io(void)
     }
     f = _PySys_GetObjectId(&PyId_stdout);
     if (f != NULL) {
-        r = _PyObject_CallMethodId(f, &PyId_flush, "");
+        r = _PyObject_CallMethodId(f, &PyId_flush, NULL);
         if (r)
             Py_DECREF(r);
         else
@@ -1138,8 +1148,8 @@ PyParser_ASTFromString(const char *s, const char *filename_str, int start,
 
 mod_ty
 PyParser_ASTFromFileObject(FILE *fp, PyObject *filename, const char* enc,
-                           int start, char *ps1,
-                           char *ps2, PyCompilerFlags *flags, int *errcode,
+                           int start, const char *ps1,
+                           const char *ps2, PyCompilerFlags *flags, int *errcode,
                            PyArena *arena)
 {
     mod_ty mod;
@@ -1171,8 +1181,8 @@ PyParser_ASTFromFileObject(FILE *fp, PyObject *filename, const char* enc,
 
 mod_ty
 PyParser_ASTFromFile(FILE *fp, const char *filename_str, const char* enc,
-                     int start, char *ps1,
-                     char *ps2, PyCompilerFlags *flags, int *errcode,
+                     int start, const char *ps1,
+                     const char *ps2, PyCompilerFlags *flags, int *errcode,
                      PyArena *arena)
 {
     mod_ty mod;
@@ -1419,7 +1429,7 @@ PyOS_CheckStack(void)
 
 #endif /* USE_STACKCHECK */
 
-/* Deprecated C API functions still provided for binary compatiblity */
+/* Deprecated C API functions still provided for binary compatibility */
 
 #undef PyParser_SimpleParseFile
 PyAPI_FUNC(node *)

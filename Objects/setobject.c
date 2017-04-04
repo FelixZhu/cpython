@@ -4,9 +4,6 @@
    Written and maintained by Raymond D. Hettinger <python@rcn.com>
    Derived from Lib/sets.py and Objects/dictobject.c.
 
-   Copyright (c) 2003-2015 Python Software Foundation.
-   All rights reserved.
-
    The basic lookup function used by all operations.
    This is based on Algorithm D from Knuth Vol. 3, Sec. 6.4.
 
@@ -237,7 +234,7 @@ set_add_entry(PySetObject *so, PyObject *key, Py_hash_t hash)
     so->used++;
     entry->key = key;
     entry->hash = hash;
-    if ((size_t)so->fill*3 < mask*2)
+    if ((size_t)so->fill*5 < mask*3)
         return 0;
     return set_table_resize(so, so->used);
 
@@ -299,8 +296,6 @@ set_table_resize(PySetObject *so, Py_ssize_t minused)
 {
     Py_ssize_t newsize;
     setentry *oldtable, *newtable, *entry;
-    Py_ssize_t oldfill = so->fill;
-    Py_ssize_t oldused = so->used;
     Py_ssize_t oldmask = so->mask;
     size_t newmask;
     int is_oldtable_malloced;
@@ -355,21 +350,20 @@ set_table_resize(PySetObject *so, Py_ssize_t minused)
     /* Make the set empty, using the new table. */
     assert(newtable != oldtable);
     memset(newtable, 0, sizeof(setentry) * newsize);
-    so->fill = oldused;
-    so->used = oldused;
     so->mask = newsize - 1;
     so->table = newtable;
 
     /* Copy the data over; this is refcount-neutral for active entries;
        dummy entries aren't copied over, of course */
     newmask = (size_t)so->mask;
-    if (oldfill == oldused) {
+    if (so->fill == so->used) {
         for (entry = oldtable; entry <= oldtable + oldmask; entry++) {
             if (entry->key != NULL) {
                 set_insert_clean(newtable, newmask, entry->key, entry->hash);
             }
         }
     } else {
+        so->fill = so->used;
         for (entry = oldtable; entry <= oldtable + oldmask; entry++) {
             if (entry->key != NULL && entry->key != dummy) {
                 set_insert_clean(newtable, newmask, entry->key, entry->hash);
@@ -648,7 +642,7 @@ set_merge(PySetObject *so, PyObject *otherset)
      * incrementally resizing as we insert new keys.  Expect
      * that there will be no (or few) overlapping keys.
      */
-    if ((so->fill + other->used)*3 >= so->mask*2) {
+    if ((so->fill + other->used)*5 >= so->mask*3) {
        if (set_table_resize(so, so->used + other->used) != 0)
            return -1;
     }
@@ -919,8 +913,8 @@ static PyObject *setiter_iternext(setiterobject *si)
     return key;
 
 fail:
-    Py_DECREF(so);
     si->si_set = NULL;
+    Py_DECREF(so);
     return NULL;
 }
 
@@ -984,7 +978,7 @@ set_update_internal(PySetObject *so, PyObject *other)
         PyObject *value;
         Py_ssize_t pos = 0;
         Py_hash_t hash;
-        Py_ssize_t dictsize = PyDict_Size(other);
+        Py_ssize_t dictsize = PyDict_GET_SIZE(other);
 
         /* Do one big resize at the start, rather than
         * incrementally resizing as we insert new keys.  Expect
@@ -992,7 +986,7 @@ set_update_internal(PySetObject *so, PyObject *other)
         */
         if (dictsize < 0)
             return -1;
-        if ((so->fill + dictsize)*3 >= so->mask*2) {
+        if ((so->fill + dictsize)*5 >= so->mask*3) {
             if (set_table_resize(so, so->used + dictsize) != 0)
                 return -1;
         }
@@ -1046,9 +1040,8 @@ PyDoc_STRVAR(update_doc,
 static PyObject *
 make_new_set(PyTypeObject *type, PyObject *iterable)
 {
-    PySetObject *so = NULL;
+    PySetObject *so;
 
-    /* create PySetObject structure */
     so = (PySetObject *)type->tp_alloc(type, 0);
     if (so == NULL)
         return NULL;
@@ -1118,24 +1111,9 @@ frozenset_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     return emptyfrozenset;
 }
 
-int
-PySet_ClearFreeList(void)
-{
-    return 0;
-}
-
-void
-PySet_Fini(void)
-{
-    Py_CLEAR(emptyfrozenset);
-}
-
 static PyObject *
 set_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
-    if (type == &PySet_Type && !_PyArg_NoKeywords("set()", kwds))
-        return NULL;
-
     return make_new_set(type, NULL);
 }
 
@@ -1494,6 +1472,10 @@ PyDoc_STRVAR(isdisjoint_doc,
 static int
 set_difference_update_internal(PySetObject *so, PyObject *other)
 {
+    if (PySet_GET_SIZE(so) == 0) {
+        return 0;
+    }
+
     if ((PyObject *)so == other)
         return set_clear_internal(so);
 
@@ -1567,6 +1549,10 @@ set_difference(PySetObject *so, PyObject *other)
     setentry *entry;
     Py_ssize_t pos = 0;
     int rv;
+
+    if (PySet_GET_SIZE(so) == 0) {
+        return set_copy(so);
+    }
 
     if (!PyAnySet_Check(other)  && !PyDict_CheckExact(other)) {
         return set_copy_and_difference(so, other);
@@ -2015,13 +2001,12 @@ set_init(PySetObject *self, PyObject *args, PyObject *kwds)
 {
     PyObject *iterable = NULL;
 
-    if (!PyAnySet_Check(self))
-        return -1;
-    if (PySet_Check(self) && !_PyArg_NoKeywords("set()", kwds))
+    if (!_PyArg_NoKeywords("set()", kwds))
         return -1;
     if (!PyArg_UnpackTuple(args, Py_TYPE(self)->tp_name, 0, 1, &iterable))
         return -1;
-    set_clear_internal(self);
+    if (self->fill)
+        set_clear_internal(self);
     self->hash = -1;
     if (iterable == NULL)
         return 0;
@@ -2343,6 +2328,18 @@ PySet_Add(PyObject *anyset, PyObject *key)
 }
 
 int
+PySet_ClearFreeList(void)
+{
+    return 0;
+}
+
+void
+PySet_Fini(void)
+{
+    Py_CLEAR(emptyfrozenset);
+}
+
+int
 _PySet_NextEntry(PyObject *set, Py_ssize_t *pos, PyObject **key, Py_hash_t *hash)
 {
     setentry *entry;
@@ -2397,7 +2394,7 @@ static PyObject *
 test_c_api(PySetObject *so)
 {
     Py_ssize_t count;
-    char *s;
+    const char *s;
     Py_ssize_t i;
     PyObject *elem=NULL, *dup=NULL, *t, *f, *dup2, *x=NULL;
     PyObject *ob = (PyObject *)so;
@@ -2465,7 +2462,7 @@ test_c_api(PySetObject *so)
     /* Exercise direct iteration */
     i = 0, count = 0;
     while (_PySet_NextEntry((PyObject *)dup, &i, &x, &hash)) {
-        s = _PyUnicode_AsString(x);
+        s = PyUnicode_AsUTF8(x);
         assert(s && (s[0] == 'a' || s[0] == 'b' || s[0] == 'c'));
         count++;
     }

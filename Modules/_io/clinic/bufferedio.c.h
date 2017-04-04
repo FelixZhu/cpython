@@ -19,14 +19,16 @@ _io__BufferedIOBase_readinto(PyObject *self, PyObject *arg)
     PyObject *return_value = NULL;
     Py_buffer buffer = {NULL, NULL};
 
-    if (!PyArg_Parse(arg, "w*:readinto", &buffer))
+    if (!PyArg_Parse(arg, "w*:readinto", &buffer)) {
         goto exit;
+    }
     return_value = _io__BufferedIOBase_readinto_impl(self, &buffer);
 
 exit:
     /* Cleanup for buffer */
-    if (buffer.obj)
+    if (buffer.obj) {
        PyBuffer_Release(&buffer);
+    }
 
     return return_value;
 }
@@ -48,14 +50,16 @@ _io__BufferedIOBase_readinto1(PyObject *self, PyObject *arg)
     PyObject *return_value = NULL;
     Py_buffer buffer = {NULL, NULL};
 
-    if (!PyArg_Parse(arg, "w*:readinto1", &buffer))
+    if (!PyArg_Parse(arg, "w*:readinto1", &buffer)) {
         goto exit;
+    }
     return_value = _io__BufferedIOBase_readinto1_impl(self, &buffer);
 
 exit:
     /* Cleanup for buffer */
-    if (buffer.obj)
+    if (buffer.obj) {
        PyBuffer_Release(&buffer);
+    }
 
     return return_value;
 }
@@ -87,20 +91,25 @@ PyDoc_STRVAR(_io__Buffered_peek__doc__,
 "\n");
 
 #define _IO__BUFFERED_PEEK_METHODDEF    \
-    {"peek", (PyCFunction)_io__Buffered_peek, METH_VARARGS, _io__Buffered_peek__doc__},
+    {"peek", (PyCFunction)_io__Buffered_peek, METH_FASTCALL, _io__Buffered_peek__doc__},
 
 static PyObject *
 _io__Buffered_peek_impl(buffered *self, Py_ssize_t size);
 
 static PyObject *
-_io__Buffered_peek(buffered *self, PyObject *args)
+_io__Buffered_peek(buffered *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     Py_ssize_t size = 0;
 
-    if (!PyArg_ParseTuple(args, "|n:peek",
-        &size))
+    if (!_PyArg_ParseStack(args, nargs, "|n:peek",
+        &size)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("peek", kwnames)) {
+        goto exit;
+    }
     return_value = _io__Buffered_peek_impl(self, size);
 
 exit:
@@ -113,20 +122,25 @@ PyDoc_STRVAR(_io__Buffered_read__doc__,
 "\n");
 
 #define _IO__BUFFERED_READ_METHODDEF    \
-    {"read", (PyCFunction)_io__Buffered_read, METH_VARARGS, _io__Buffered_read__doc__},
+    {"read", (PyCFunction)_io__Buffered_read, METH_FASTCALL, _io__Buffered_read__doc__},
 
 static PyObject *
 _io__Buffered_read_impl(buffered *self, Py_ssize_t n);
 
 static PyObject *
-_io__Buffered_read(buffered *self, PyObject *args)
+_io__Buffered_read(buffered *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     Py_ssize_t n = -1;
 
-    if (!PyArg_ParseTuple(args, "|O&:read",
-        _PyIO_ConvertSsize_t, &n))
+    if (!_PyArg_ParseStack(args, nargs, "|O&:read",
+        _PyIO_ConvertSsize_t, &n)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("read", kwnames)) {
+        goto exit;
+    }
     return_value = _io__Buffered_read_impl(self, n);
 
 exit:
@@ -134,24 +148,30 @@ exit:
 }
 
 PyDoc_STRVAR(_io__Buffered_read1__doc__,
-"read1($self, size, /)\n"
+"read1($self, size=-1, /)\n"
 "--\n"
 "\n");
 
 #define _IO__BUFFERED_READ1_METHODDEF    \
-    {"read1", (PyCFunction)_io__Buffered_read1, METH_O, _io__Buffered_read1__doc__},
+    {"read1", (PyCFunction)_io__Buffered_read1, METH_FASTCALL, _io__Buffered_read1__doc__},
 
 static PyObject *
 _io__Buffered_read1_impl(buffered *self, Py_ssize_t n);
 
 static PyObject *
-_io__Buffered_read1(buffered *self, PyObject *arg)
+_io__Buffered_read1(buffered *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
-    Py_ssize_t n;
+    Py_ssize_t n = -1;
 
-    if (!PyArg_Parse(arg, "n:read1", &n))
+    if (!_PyArg_ParseStack(args, nargs, "|n:read1",
+        &n)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("read1", kwnames)) {
+        goto exit;
+    }
     return_value = _io__Buffered_read1_impl(self, n);
 
 exit:
@@ -175,14 +195,16 @@ _io__Buffered_readinto(buffered *self, PyObject *arg)
     PyObject *return_value = NULL;
     Py_buffer buffer = {NULL, NULL};
 
-    if (!PyArg_Parse(arg, "w*:readinto", &buffer))
+    if (!PyArg_Parse(arg, "w*:readinto", &buffer)) {
         goto exit;
+    }
     return_value = _io__Buffered_readinto_impl(self, &buffer);
 
 exit:
     /* Cleanup for buffer */
-    if (buffer.obj)
+    if (buffer.obj) {
        PyBuffer_Release(&buffer);
+    }
 
     return return_value;
 }
@@ -204,14 +226,16 @@ _io__Buffered_readinto1(buffered *self, PyObject *arg)
     PyObject *return_value = NULL;
     Py_buffer buffer = {NULL, NULL};
 
-    if (!PyArg_Parse(arg, "w*:readinto1", &buffer))
+    if (!PyArg_Parse(arg, "w*:readinto1", &buffer)) {
         goto exit;
+    }
     return_value = _io__Buffered_readinto1_impl(self, &buffer);
 
 exit:
     /* Cleanup for buffer */
-    if (buffer.obj)
+    if (buffer.obj) {
        PyBuffer_Release(&buffer);
+    }
 
     return return_value;
 }
@@ -222,20 +246,25 @@ PyDoc_STRVAR(_io__Buffered_readline__doc__,
 "\n");
 
 #define _IO__BUFFERED_READLINE_METHODDEF    \
-    {"readline", (PyCFunction)_io__Buffered_readline, METH_VARARGS, _io__Buffered_readline__doc__},
+    {"readline", (PyCFunction)_io__Buffered_readline, METH_FASTCALL, _io__Buffered_readline__doc__},
 
 static PyObject *
 _io__Buffered_readline_impl(buffered *self, Py_ssize_t size);
 
 static PyObject *
-_io__Buffered_readline(buffered *self, PyObject *args)
+_io__Buffered_readline(buffered *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     Py_ssize_t size = -1;
 
-    if (!PyArg_ParseTuple(args, "|O&:readline",
-        _PyIO_ConvertSsize_t, &size))
+    if (!_PyArg_ParseStack(args, nargs, "|O&:readline",
+        _PyIO_ConvertSsize_t, &size)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("readline", kwnames)) {
+        goto exit;
+    }
     return_value = _io__Buffered_readline_impl(self, size);
 
 exit:
@@ -248,21 +277,26 @@ PyDoc_STRVAR(_io__Buffered_seek__doc__,
 "\n");
 
 #define _IO__BUFFERED_SEEK_METHODDEF    \
-    {"seek", (PyCFunction)_io__Buffered_seek, METH_VARARGS, _io__Buffered_seek__doc__},
+    {"seek", (PyCFunction)_io__Buffered_seek, METH_FASTCALL, _io__Buffered_seek__doc__},
 
 static PyObject *
 _io__Buffered_seek_impl(buffered *self, PyObject *targetobj, int whence);
 
 static PyObject *
-_io__Buffered_seek(buffered *self, PyObject *args)
+_io__Buffered_seek(buffered *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     PyObject *targetobj;
     int whence = 0;
 
-    if (!PyArg_ParseTuple(args, "O|i:seek",
-        &targetobj, &whence))
+    if (!_PyArg_ParseStack(args, nargs, "O|i:seek",
+        &targetobj, &whence)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("seek", kwnames)) {
+        goto exit;
+    }
     return_value = _io__Buffered_seek_impl(self, targetobj, whence);
 
 exit:
@@ -275,21 +309,26 @@ PyDoc_STRVAR(_io__Buffered_truncate__doc__,
 "\n");
 
 #define _IO__BUFFERED_TRUNCATE_METHODDEF    \
-    {"truncate", (PyCFunction)_io__Buffered_truncate, METH_VARARGS, _io__Buffered_truncate__doc__},
+    {"truncate", (PyCFunction)_io__Buffered_truncate, METH_FASTCALL, _io__Buffered_truncate__doc__},
 
 static PyObject *
 _io__Buffered_truncate_impl(buffered *self, PyObject *pos);
 
 static PyObject *
-_io__Buffered_truncate(buffered *self, PyObject *args)
+_io__Buffered_truncate(buffered *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     PyObject *pos = Py_None;
 
-    if (!PyArg_UnpackTuple(args, "truncate",
+    if (!_PyArg_UnpackStack(args, nargs, "truncate",
         0, 1,
-        &pos))
+        &pos)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("truncate", kwnames)) {
+        goto exit;
+    }
     return_value = _io__Buffered_truncate_impl(self, pos);
 
 exit:
@@ -310,13 +349,15 @@ static int
 _io_BufferedReader___init__(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     int return_value = -1;
-    static char *_keywords[] = {"raw", "buffer_size", NULL};
+    static const char * const _keywords[] = {"raw", "buffer_size", NULL};
+    static _PyArg_Parser _parser = {"O|n:BufferedReader", _keywords, 0};
     PyObject *raw;
     Py_ssize_t buffer_size = DEFAULT_BUFFER_SIZE;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|n:BufferedReader", _keywords,
-        &raw, &buffer_size))
+    if (!_PyArg_ParseTupleAndKeywordsFast(args, kwargs, &_parser,
+        &raw, &buffer_size)) {
         goto exit;
+    }
     return_value = _io_BufferedReader___init___impl((buffered *)self, raw, buffer_size);
 
 exit:
@@ -341,13 +382,15 @@ static int
 _io_BufferedWriter___init__(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     int return_value = -1;
-    static char *_keywords[] = {"raw", "buffer_size", NULL};
+    static const char * const _keywords[] = {"raw", "buffer_size", NULL};
+    static _PyArg_Parser _parser = {"O|n:BufferedWriter", _keywords, 0};
     PyObject *raw;
     Py_ssize_t buffer_size = DEFAULT_BUFFER_SIZE;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|n:BufferedWriter", _keywords,
-        &raw, &buffer_size))
+    if (!_PyArg_ParseTupleAndKeywordsFast(args, kwargs, &_parser,
+        &raw, &buffer_size)) {
         goto exit;
+    }
     return_value = _io_BufferedWriter___init___impl((buffered *)self, raw, buffer_size);
 
 exit:
@@ -371,14 +414,16 @@ _io_BufferedWriter_write(buffered *self, PyObject *arg)
     PyObject *return_value = NULL;
     Py_buffer buffer = {NULL, NULL};
 
-    if (!PyArg_Parse(arg, "y*:write", &buffer))
+    if (!PyArg_Parse(arg, "y*:write", &buffer)) {
         goto exit;
+    }
     return_value = _io_BufferedWriter_write_impl(self, &buffer);
 
 exit:
     /* Cleanup for buffer */
-    if (buffer.obj)
+    if (buffer.obj) {
        PyBuffer_Release(&buffer);
+    }
 
     return return_value;
 }
@@ -410,11 +455,13 @@ _io_BufferedRWPair___init__(PyObject *self, PyObject *args, PyObject *kwargs)
     Py_ssize_t buffer_size = DEFAULT_BUFFER_SIZE;
 
     if ((Py_TYPE(self) == &PyBufferedRWPair_Type) &&
-        !_PyArg_NoKeywords("BufferedRWPair", kwargs))
+        !_PyArg_NoKeywords("BufferedRWPair", kwargs)) {
         goto exit;
+    }
     if (!PyArg_ParseTuple(args, "OO|n:BufferedRWPair",
-        &reader, &writer, &buffer_size))
+        &reader, &writer, &buffer_size)) {
         goto exit;
+    }
     return_value = _io_BufferedRWPair___init___impl((rwpair *)self, reader, writer, buffer_size);
 
 exit:
@@ -439,16 +486,18 @@ static int
 _io_BufferedRandom___init__(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     int return_value = -1;
-    static char *_keywords[] = {"raw", "buffer_size", NULL};
+    static const char * const _keywords[] = {"raw", "buffer_size", NULL};
+    static _PyArg_Parser _parser = {"O|n:BufferedRandom", _keywords, 0};
     PyObject *raw;
     Py_ssize_t buffer_size = DEFAULT_BUFFER_SIZE;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|n:BufferedRandom", _keywords,
-        &raw, &buffer_size))
+    if (!_PyArg_ParseTupleAndKeywordsFast(args, kwargs, &_parser,
+        &raw, &buffer_size)) {
         goto exit;
+    }
     return_value = _io_BufferedRandom___init___impl((buffered *)self, raw, buffer_size);
 
 exit:
     return return_value;
 }
-/*[clinic end generated code: output=2bbb5e239b4ffe6f input=a9049054013a1b77]*/
+/*[clinic end generated code: output=e37b969b1acaa09c input=a9049054013a1b77]*/

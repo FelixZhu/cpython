@@ -1,5 +1,6 @@
 import importlib
 import shutil
+import stat
 import sys
 import os
 import unittest
@@ -12,9 +13,6 @@ TESTFN = support.TESTFN
 
 
 class TestSupport(unittest.TestCase):
-    def setUp(self):
-        support.unlink(TESTFN)
-    tearDown = setUp
 
     def test_import_module(self):
         support.import_module("ftplib")
@@ -46,15 +44,28 @@ class TestSupport(unittest.TestCase):
         support.unlink(TESTFN)
 
     def test_rmtree(self):
-        TESTDIRN = os.path.basename(tempfile.mkdtemp(dir='.'))
-        self.addCleanup(support.rmtree, TESTDIRN)
-        support.rmtree(TESTDIRN)
+        dirpath = support.TESTFN + 'd'
+        subdirpath = os.path.join(dirpath, 'subdir')
+        os.mkdir(dirpath)
+        os.mkdir(subdirpath)
+        support.rmtree(dirpath)
+        self.assertFalse(os.path.exists(dirpath))
+        with support.swap_attr(support, 'verbose', 0):
+            support.rmtree(dirpath)
 
-        os.mkdir(TESTDIRN)
-        os.mkdir(os.path.join(TESTDIRN, TESTDIRN))
-        support.rmtree(TESTDIRN)
-        self.assertFalse(os.path.exists(TESTDIRN))
-        support.rmtree(TESTDIRN)
+        os.mkdir(dirpath)
+        os.mkdir(subdirpath)
+        os.chmod(dirpath, stat.S_IRUSR|stat.S_IXUSR)
+        with support.swap_attr(support, 'verbose', 0):
+            support.rmtree(dirpath)
+        self.assertFalse(os.path.exists(dirpath))
+
+        os.mkdir(dirpath)
+        os.mkdir(subdirpath)
+        os.chmod(dirpath, 0)
+        with support.swap_attr(support, 'verbose', 0):
+            support.rmtree(dirpath)
+        self.assertFalse(os.path.exists(dirpath))
 
     def test_forget(self):
         mod_filename = TESTFN + '.py'
@@ -144,8 +155,11 @@ class TestSupport(unittest.TestCase):
         finally:
             shutil.rmtree(path)
 
-        expected = ['tests may fail, unable to create temp dir: ' + path]
-        self.assertEqual(warnings, expected)
+        self.assertEqual(len(warnings), 1, warnings)
+        warn = warnings[0]
+        self.assertTrue(warn.startswith(f'tests may fail, unable to create '
+                                        f'temporary directory {path!r}: '),
+                        warn)
 
     # Tests for change_cwd()
 
@@ -186,8 +200,12 @@ class TestSupport(unittest.TestCase):
                     self.assertEqual(os.getcwd(), new_cwd)
                 warnings = [str(w.message) for w in recorder.warnings]
 
-        expected = ['tests may fail, unable to change CWD to: ' + bad_dir]
-        self.assertEqual(warnings, expected)
+        self.assertEqual(len(warnings), 1, warnings)
+        warn = warnings[0]
+        self.assertTrue(warn.startswith(f'tests may fail, unable to change '
+                                        f'the current working directory '
+                                        f'to {bad_dir!r}: '),
+                        warn)
 
     # Tests for change_cwd()
 
@@ -198,7 +216,13 @@ class TestSupport(unittest.TestCase):
             with support.change_cwd(path=path, quiet=True):
                 pass
             messages = [str(w.message) for w in recorder.warnings]
-        self.assertEqual(messages, ['tests may fail, unable to change CWD to: ' + path])
+
+        self.assertEqual(len(messages), 1, messages)
+        msg = messages[0]
+        self.assertTrue(msg.startswith(f'tests may fail, unable to change '
+                                       f'the current working directory '
+                                       f'to {path!r}: '),
+                        msg)
 
     # Tests for temp_cwd()
 
@@ -229,8 +253,9 @@ class TestSupport(unittest.TestCase):
         self.assertEqual(cm.exception.errno, errno.EBADF)
 
     def test_check_syntax_error(self):
-        support.check_syntax_error(self, "def class")
-        self.assertRaises(AssertionError, support.check_syntax_error, self, "1")
+        support.check_syntax_error(self, "def class", lineno=1, offset=9)
+        with self.assertRaises(AssertionError):
+            support.check_syntax_error(self, "x=1")
 
     def test_CleanImport(self):
         import importlib

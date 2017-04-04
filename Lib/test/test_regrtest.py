@@ -4,10 +4,8 @@ Tests of regrtest.py.
 Note: test_regrtest cannot be run twice in parallel.
 """
 
-import argparse
 import contextlib
 import faulthandler
-import getopt
 import io
 import os.path
 import platform
@@ -15,6 +13,7 @@ import re
 import subprocess
 import sys
 import sysconfig
+import tempfile
 import textwrap
 import unittest
 from test import libregrtest
@@ -110,7 +109,7 @@ class ParseArgsTestCase(unittest.TestCase):
                 self.assertEqual(ns.verbose, 0)
 
     def test_slow(self):
-        for opt in '-o', '--slow':
+        for opt in '-o', '--slowest':
             with self.subTest(opt=opt):
                 ns = libregrtest._parse_args([opt])
                 self.assertTrue(ns.print_slow)
@@ -227,6 +226,8 @@ class ParseArgsTestCase(unittest.TestCase):
                 self.checkError([opt, 'foo'], 'invalid int value')
                 self.checkError([opt, '2', '-T'], "don't go together")
                 self.checkError([opt, '2', '-l'], "don't go together")
+                self.checkError([opt, '0', '-T'], "don't go together")
+                self.checkError([opt, '0', '-l'], "don't go together")
 
     def test_coverage(self):
         for opt in '-T', '--coverage':
@@ -300,24 +301,26 @@ class ParseArgsTestCase(unittest.TestCase):
         self.assertEqual(ns.verbose, 0)
         self.assertEqual(ns.args, ['foo'])
 
+    def test_arg_option_arg(self):
+        ns = libregrtest._parse_args(['test_unaryop', '-v', 'test_binop'])
+        self.assertEqual(ns.verbose, 1)
+        self.assertEqual(ns.args, ['test_unaryop', 'test_binop'])
+
+    def test_unknown_option(self):
+        self.checkError(['--unknown-option'],
+                        'unrecognized arguments: --unknown-option')
+
 
 class BaseTestCase(unittest.TestCase):
     TEST_UNIQUE_ID = 1
     TESTNAME_PREFIX = 'test_regrtest_'
-    TESTNAME_REGEX = r'test_[a-z0-9_]+'
+    TESTNAME_REGEX = r'test_[a-zA-Z0-9_]+'
 
     def setUp(self):
         self.testdir = os.path.realpath(os.path.dirname(__file__))
 
-        # When test_regrtest is interrupted by CTRL+c, it can leave
-        # temporary test files
-        remove = [entry.path
-                  for entry in os.scandir(self.testdir)
-                  if (entry.name.startswith(self.TESTNAME_PREFIX)
-                      and entry.name.endswith(".py"))]
-        for path in remove:
-            print("WARNING: test_regrtest: remove %s" % path)
-            support.unlink(path)
+        self.tmptestdir = tempfile.mkdtemp()
+        self.addCleanup(support.rmtree, self.tmptestdir)
 
     def create_test(self, name=None, code=''):
         if not name:
@@ -326,8 +329,8 @@ class BaseTestCase(unittest.TestCase):
 
         # test_regrtest cannot be run twice in parallel because
         # of setUp() and create_test()
-        name = self.TESTNAME_PREFIX + "%s_%s" % (os.getpid(), name)
-        path = os.path.join(self.testdir, name + '.py')
+        name = self.TESTNAME_PREFIX + name
+        path = os.path.join(self.tmptestdir, name + '.py')
 
         self.addCleanup(support.unlink, path)
         # Use 'x' mode to ensure that we do not override existing tests
@@ -351,12 +354,13 @@ class BaseTestCase(unittest.TestCase):
         self.assertRegex(output, regex)
 
     def parse_executed_tests(self, output):
-        regex = r'^\[ *[0-9]+(?:/ *[0-9]+)?\] (%s)$' % self.TESTNAME_REGEX
+        regex = (r'^[0-9]+:[0-9]+:[0-9]+ \[ *[0-9]+(?:/ *[0-9]+)*\] (%s)'
+                 % self.TESTNAME_REGEX)
         parser = re.finditer(regex, output, re.MULTILINE)
         return list(match.group(1) for match in parser)
 
     def check_executed_tests(self, output, tests, skipped=(), failed=(),
-                             omitted=(), randomize=False):
+                             omitted=(), randomize=False, interrupted=False):
         if isinstance(tests, str):
             tests = [tests]
         if isinstance(skipped, str):
@@ -404,6 +408,17 @@ class BaseTestCase(unittest.TestCase):
             if not skipped and not failed and good > 1:
                 regex = 'All %s' % regex
             self.check_line(output, regex)
+
+        if interrupted:
+            self.check_line(output, 'Test suite interrupted by signal SIGINT.')
+
+        if nfailed:
+            result = 'FAILURE'
+        elif interrupted:
+            result = 'INTERRUPTED'
+        else:
+            result = 'SUCCESS'
+        self.check_line(output, 'Tests result: %s' % result)
 
     def parse_random_seed(self, output):
         match = self.regex_search(r'Using random seed ([0-9]+)', output)
@@ -461,7 +476,8 @@ class ProgramsTestCase(BaseTestCase):
         self.tests = [self.create_test() for index in range(self.NTEST)]
 
         self.python_args = ['-Wd', '-E', '-bb']
-        self.regrtest_args = ['-uall', '-rwW']
+        self.regrtest_args = ['-uall', '-rwW',
+                              '--testdir=%s' % self.tmptestdir]
         if hasattr(faulthandler, 'dump_traceback_later'):
             self.regrtest_args.extend(('--timeout', '3600', '-j4'))
         if sys.platform == 'win32':
@@ -518,7 +534,8 @@ class ProgramsTestCase(BaseTestCase):
     def test_tools_script_run_tests(self):
         # Tools/scripts/run_tests.py
         script = os.path.join(ROOT_DIR, 'Tools', 'scripts', 'run_tests.py')
-        self.run_tests([script, *self.tests])
+        args = [script, *self.regrtest_args, *self.tests]
+        self.run_tests(args)
 
     def run_batch(self, *args):
         proc = self.run_command(args)
@@ -530,7 +547,7 @@ class ProgramsTestCase(BaseTestCase):
     def test_tools_buildbot_test(self):
         # Tools\buildbot\test.bat
         script = os.path.join(ROOT_DIR, 'Tools', 'buildbot', 'test.bat')
-        test_args = []
+        test_args = ['--testdir=%s' % self.tmptestdir]
         if platform.architecture()[0] == '64bit':
             test_args.append('-x64')   # 64-bit build
         if not Py_DEBUG:
@@ -554,8 +571,9 @@ class ArgsTestCase(BaseTestCase):
     Test arguments of the Python test suite.
     """
 
-    def run_tests(self, *args, **kw):
-        return self.run_python(['-m', 'test', *args], **kw)
+    def run_tests(self, *testargs, **kw):
+        cmdargs = ['-m', 'test', '--testdir=%s' % self.tmptestdir, *testargs]
+        return self.run_python(cmdargs, **kw)
 
     def test_failing_test(self):
         # test a failing test
@@ -566,8 +584,8 @@ class ArgsTestCase(BaseTestCase):
                 def test_failing(self):
                     self.fail("bug")
         """)
-        test_ok = self.create_test()
-        test_failing = self.create_test(code=code)
+        test_ok = self.create_test('ok')
+        test_failing = self.create_test('failing', code=code)
         tests = [test_ok, test_failing]
 
         output = self.run_tests(*tests, exitcode=1)
@@ -627,6 +645,22 @@ class ArgsTestCase(BaseTestCase):
         # [2/2] test_2
         filename = support.TESTFN
         self.addCleanup(support.unlink, filename)
+
+        # test format '0:00:00 [2/7] test_opcodes -- test_grammar took 0 sec'
+        with open(filename, "w") as fp:
+            previous = None
+            for index, name in enumerate(tests, 1):
+                line = ("00:00:%02i [%s/%s] %s"
+                        % (index, index, len(tests), name))
+                if previous:
+                    line += " -- %s took 0 sec" % previous
+                print(line, file=fp)
+                previous = name
+
+        output = self.run_tests('--fromfile', filename)
+        self.check_executed_tests(output, tests)
+
+        # test format '[2/7] test_opcodes'
         with open(filename, "w") as fp:
             for index, name in enumerate(tests, 1):
                 print("[%s/%s] %s" % (index, len(tests), name), file=fp)
@@ -634,67 +668,94 @@ class ArgsTestCase(BaseTestCase):
         output = self.run_tests('--fromfile', filename)
         self.check_executed_tests(output, tests)
 
+        # test format 'test_opcodes'
+        with open(filename, "w") as fp:
+            for name in tests:
+                print(name, file=fp)
+
+        output = self.run_tests('--fromfile', filename)
+        self.check_executed_tests(output, tests)
+
+        # test format 'Lib/test/test_opcodes.py'
+        with open(filename, "w") as fp:
+            for name in tests:
+                print('Lib/test/%s.py' % name, file=fp)
+
+        output = self.run_tests('--fromfile', filename)
+        self.check_executed_tests(output, tests)
+
     def test_interrupted(self):
         code = TEST_INTERRUPTED
-        test = self.create_test("sigint", code=code)
+        test = self.create_test('sigint', code=code)
         output = self.run_tests(test, exitcode=1)
-        self.check_executed_tests(output, test, omitted=test)
+        self.check_executed_tests(output, test, omitted=test,
+                                  interrupted=True)
 
-    def test_slow(self):
-        # test --slow
+    def test_slowest(self):
+        # test --slowest
         tests = [self.create_test() for index in range(3)]
-        output = self.run_tests("--slow", *tests)
+        output = self.run_tests("--slowest", *tests)
         self.check_executed_tests(output, tests)
         regex = ('10 slowest tests:\n'
-                 '(?:%s: [0-9]+\.[0-9]+s\n){%s}'
+                 '(?:- %s: .*\n){%s}'
                  % (self.TESTNAME_REGEX, len(tests)))
         self.check_line(output, regex)
 
     def test_slow_interrupted(self):
-        # Issue #25373: test --slow with an interrupted test
+        # Issue #25373: test --slowest with an interrupted test
         code = TEST_INTERRUPTED
         test = self.create_test("sigint", code=code)
 
-        for multiprocessing in (False, True):
+        try:
+            import threading
+            tests = (False, True)
+        except ImportError:
+            tests = (False,)
+        for multiprocessing in tests:
             if multiprocessing:
-                args = ("--slow", "-j2", test)
+                args = ("--slowest", "-j2", test)
             else:
-                args = ("--slow", test)
+                args = ("--slowest", test)
             output = self.run_tests(*args, exitcode=1)
-            self.check_executed_tests(output, test, omitted=test)
+            self.check_executed_tests(output, test,
+                                      omitted=test, interrupted=True)
+
             regex = ('10 slowest tests:\n')
             self.check_line(output, regex)
-            self.check_line(output, 'Test suite interrupted by signal SIGINT.')
 
     def test_coverage(self):
         # test --coverage
-        test = self.create_test()
+        test = self.create_test('coverage')
         output = self.run_tests("--coverage", test)
         self.check_executed_tests(output, [test])
-        regex = ('lines +cov% +module +\(path\)\n'
-                 '(?: *[0-9]+ *[0-9]{1,2}% *[^ ]+ +\([^)]+\)+)+')
+        regex = (r'lines +cov% +module +\(path\)\n'
+                 r'(?: *[0-9]+ *[0-9]{1,2}% *[^ ]+ +\([^)]+\)+)+')
         self.check_line(output, regex)
 
     def test_wait(self):
         # test --wait
-        test = self.create_test()
+        test = self.create_test('wait')
         output = self.run_tests("--wait", test, input='key')
         self.check_line(output, 'Press any key to continue')
 
     def test_forever(self):
         # test --forever
         code = textwrap.dedent("""
+            import builtins
             import unittest
 
             class ForeverTester(unittest.TestCase):
-                RUN = 1
-
                 def test_run(self):
-                    ForeverTester.RUN += 1
-                    if ForeverTester.RUN > 3:
-                        self.fail("fail at the 3rd runs")
+                    # Store the state in the builtins module, because the test
+                    # module is reload at each run
+                    if 'RUN' in builtins.__dict__:
+                        builtins.__dict__['RUN'] += 1
+                        if builtins.__dict__['RUN'] >= 3:
+                            self.fail("fail at the 3rd runs")
+                    else:
+                        builtins.__dict__['RUN'] = 1
         """)
-        test = self.create_test(code=code)
+        test = self.create_test('forever', code=code)
         output = self.run_tests('--forever', test, exitcode=1)
         self.check_executed_tests(output, [test]*3, failed=test)
 
@@ -722,7 +783,7 @@ class ArgsTestCase(BaseTestCase):
                     fd = os.open(__file__, os.O_RDONLY)
                     # bug: never cloes the file descriptor
         """)
-        test = self.create_test(code=code)
+        test = self.create_test('huntrleaks', code=code)
 
         filename = 'reflog.txt'
         self.addCleanup(support.unlink, filename)
@@ -735,11 +796,11 @@ class ArgsTestCase(BaseTestCase):
         self.check_line(output, re.escape(line))
 
         line2 = '%s leaked [1, 1, 1] file descriptors, sum=3\n' % test
-        self.check_line(output, re.escape(line2))
+        self.assertIn(line2, output)
 
         with open(filename) as fp:
             reflog = fp.read()
-            self.assertEqual(reflog, line2)
+            self.assertIn(line2, reflog)
 
     def test_list_tests(self):
         # test --list-tests
@@ -747,6 +808,17 @@ class ArgsTestCase(BaseTestCase):
         output = self.run_tests('--list-tests', *tests)
         self.assertEqual(output.rstrip().splitlines(),
                          tests)
+
+    def test_crashed(self):
+        # Any code which causes a crash
+        code = 'import faulthandler; faulthandler._sigsegv()'
+        crash_test = self.create_test(name="crash", code=code)
+        ok_test = self.create_test(name="ok")
+
+        tests = [crash_test, ok_test]
+        output = self.run_tests("-j2", *tests, exitcode=1)
+        self.check_executed_tests(output, tests, failed=crash_test,
+                                  randomize=True)
 
 
 if __name__ == '__main__':

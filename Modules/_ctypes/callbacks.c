@@ -77,7 +77,7 @@ PyTypeObject PyCThunk_Type = {
 /**************************************************************/
 
 static void
-PrintError(char *msg, ...)
+PrintError(const char *msg, ...)
 {
     char buf[512];
     PyObject *f = PySys_GetObject("stderr");
@@ -181,7 +181,7 @@ static void _CallPythonObject(void *mem,
             */
         } else if (dict) {
             /* Hm, shouldn't we use PyCData_AtAddress() or something like that instead? */
-            CDataObject *obj = (CDataObject *)PyObject_CallFunctionObjArgs(cnv, NULL);
+            CDataObject *obj = (CDataObject *)_PyObject_CallNoArg(cnv);
             if (!obj) {
                 PrintError("create argument %d:\n", i);
                 Py_DECREF(cnv);
@@ -305,7 +305,7 @@ static void closure_fcn(ffi_cif *cif,
 static CThunkObject* CThunkObject_new(Py_ssize_t nArgs)
 {
     CThunkObject *p;
-    int i;
+    Py_ssize_t i;
 
     p = PyObject_GC_NewVar(CThunkObject, &PyCThunk_Type, nArgs);
     if (p == NULL) {
@@ -313,11 +313,13 @@ static CThunkObject* CThunkObject_new(Py_ssize_t nArgs)
         return NULL;
     }
 
-    p->pcl_exec = NULL;
     p->pcl_write = NULL;
+    p->pcl_exec = NULL;
     memset(&p->cif, 0, sizeof(p->cif));
+    p->flags = 0;
     p->converters = NULL;
     p->callable = NULL;
+    p->restype = NULL;
     p->setfunc = NULL;
     p->ffi_restype = NULL;
 
@@ -533,7 +535,7 @@ long Call_CanUnloadNow(void)
         return E_FAIL;
     }
 
-    result = PyObject_CallFunction(func, NULL);
+    result = _PyObject_CallNoArg(func);
     Py_DECREF(func);
     if (!result) {
         PyErr_WriteUnraisable(context ? context : Py_None);

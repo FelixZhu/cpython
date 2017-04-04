@@ -47,6 +47,7 @@ class _Database(collections.MutableMapping):
 
     def __init__(self, filebasename, mode, flag='c'):
         self._mode = mode
+        self._readonly = (flag == 'r')
 
         # The directory file is a text file.  Each line looks like
         #    "%r, (%d, %d)\n" % (key, pos, siz)
@@ -67,7 +68,7 @@ class _Database(collections.MutableMapping):
 
         # Handle the creation
         self._create(flag)
-        self._update()
+        self._update(flag)
 
     def _create(self, flag):
         if flag == 'n':
@@ -80,19 +81,30 @@ class _Database(collections.MutableMapping):
         try:
             f = _io.open(self._datfile, 'r', encoding="Latin-1")
         except OSError:
+            if flag not in ('c', 'n'):
+                import warnings
+                warnings.warn("The database file is missing, the "
+                              "semantics of the 'c' flag will be used.",
+                              DeprecationWarning, stacklevel=4)
             with _io.open(self._datfile, 'w', encoding="Latin-1") as f:
                 self._chmod(self._datfile)
         else:
             f.close()
 
     # Read directory file into the in-memory index dict.
-    def _update(self):
+    def _update(self, flag):
         self._index = {}
         try:
             f = _io.open(self._dirfile, 'r', encoding="Latin-1")
         except OSError:
-            pass
+            self._modified = not self._readonly
+            if flag not in ('c', 'n'):
+                import warnings
+                warnings.warn("The index file is missing, the "
+                              "semantics of the 'c' flag will be used.",
+                              DeprecationWarning, stacklevel=4)
         else:
+            self._modified = False
             with f:
                 for line in f:
                     line = line.rstrip()
@@ -107,7 +119,7 @@ class _Database(collections.MutableMapping):
         # CAUTION:  It's vital that _commit() succeed, and _commit() can
         # be called from __del__().  Therefore we must never reference a
         # global in this routine.
-        if self._index is None:
+        if self._index is None or not self._modified:
             return  # nothing to do
 
         try:
@@ -178,6 +190,10 @@ class _Database(collections.MutableMapping):
             f.write("%r, %r\n" % (key.decode("Latin-1"), pos_and_siz_pair))
 
     def __setitem__(self, key, val):
+        if self._readonly:
+            import warnings
+            warnings.warn('The database is opened for reading only',
+                          DeprecationWarning, stacklevel=2)
         if isinstance(key, str):
             key = key.encode('utf-8')
         elif not isinstance(key, (bytes, bytearray)):
@@ -187,6 +203,7 @@ class _Database(collections.MutableMapping):
         elif not isinstance(val, (bytes, bytearray)):
             raise TypeError("values must be bytes or strings")
         self._verify_open()
+        self._modified = True
         if key not in self._index:
             self._addkey(key, self._addval(val))
         else:
@@ -212,9 +229,14 @@ class _Database(collections.MutableMapping):
             # (so that _commit() never gets called).
 
     def __delitem__(self, key):
+        if self._readonly:
+            import warnings
+            warnings.warn('The database is opened for reading only',
+                          DeprecationWarning, stacklevel=2)
         if isinstance(key, str):
             key = key.encode('utf-8')
         self._verify_open()
+        self._modified = True
         # The blocks used by the associated value are lost.
         del self._index[key]
         # XXX It's unclear why we do a _commit() here (the code always
@@ -300,4 +322,8 @@ def open(file, flag='c', mode=0o666):
     else:
         # Turn off any bits that are set in the umask
         mode = mode & (~um)
+    if flag not in ('r', 'w', 'c', 'n'):
+        import warnings
+        warnings.warn("Flag must be one of 'r', 'w', 'c', or 'n'",
+                      DeprecationWarning, stacklevel=2)
     return _Database(file, mode, flag=flag)

@@ -255,8 +255,7 @@ _gdbm_gdbm_close_impl(dbmobject *self)
     if (self->di_dbm)
         gdbm_close(self->di_dbm);
     self->di_dbm = NULL;
-    Py_INCREF(Py_None);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 /* XXX Should return a set or a set view */
@@ -319,7 +318,7 @@ dbm_contains(PyObject *self, PyObject *arg)
         return -1;
     }
     if (PyUnicode_Check(arg)) {
-        key.dptr = PyUnicode_AsUTF8AndSize(arg, &size);
+        key.dptr = (char *)PyUnicode_AsUTF8AndSize(arg, &size);
         key.dsize = size;
         if (key.dptr == NULL)
             return -1;
@@ -375,8 +374,7 @@ _gdbm_gdbm_firstkey_impl(dbmobject *self)
         return v;
     }
     else {
-        Py_INCREF(Py_None);
-        return Py_None;
+        Py_RETURN_NONE;
     }
 }
 
@@ -415,8 +413,7 @@ _gdbm_gdbm_nextkey_impl(dbmobject *self, const char *key,
         return v;
     }
     else {
-        Py_INCREF(Py_None);
-        return Py_None;
+        Py_RETURN_NONE;
     }
 }
 
@@ -445,8 +442,7 @@ _gdbm_gdbm_reorganize_impl(dbmobject *self)
             PyErr_SetString(DbmError, gdbm_strerror(gdbm_errno));
         return NULL;
     }
-    Py_INCREF(Py_None);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 /*[clinic input]
@@ -464,8 +460,7 @@ _gdbm_gdbm_sync_impl(dbmobject *self)
 {
     check_dbmobject_open(self);
     gdbm_sync(self->di_dbm);
-    Py_INCREF(Py_None);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyObject *
@@ -562,9 +557,8 @@ when the database has to be created.  It defaults to octal 0o666.
 [clinic start generated code]*/
 
 static PyObject *
-dbmopen_impl(PyModuleDef *module, const char *name, const char *flags,
-             int mode)
-/*[clinic end generated code: output=365b31415c03ccd4 input=55563cd60e51984a]*/
+dbmopen_impl(PyObject *module, const char *name, const char *flags, int mode)
+/*[clinic end generated code: output=31aa1bafdf5da688 input=55563cd60e51984a]*/
 {
     int iflags;
 
@@ -615,7 +609,7 @@ dbmopen_impl(PyModuleDef *module, const char *name, const char *flags,
     return newdbmobject(name, iflags, mode);
 }
 
-static char dbmmodule_open_flags[] = "rwcn"
+static const char dbmmodule_open_flags[] = "rwcn"
 #ifdef GDBM_FAST
                                      "f"
 #endif

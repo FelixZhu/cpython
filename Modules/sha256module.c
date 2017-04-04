@@ -100,7 +100,7 @@ static void SHAcopy(SHAobject *src, SHAobject *dest)
  * algorithms in a highly modular and flexible manner.
  *
  * The library is free for all purposes without any express
- * gurantee it works.
+ * guarantee it works.
  *
  * Tom St Denis, tomstdenis@iahu.ca, http://libtom.org
  */
@@ -483,8 +483,7 @@ SHA256Type_update(SHAobject *self, PyObject *obj)
     sha_update(self, buf.buf, buf.len);
 
     PyBuffer_Release(&buf);
-    Py_INCREF(Py_None);
-    return Py_None;
+    Py_RETURN_NONE;
 }
 
 static PyMethodDef SHA_methods[] = {
@@ -607,8 +606,8 @@ Return a new SHA-256 hash object; optionally initialized with a string.
 [clinic start generated code]*/
 
 static PyObject *
-_sha256_sha256_impl(PyModuleDef *module, PyObject *string)
-/*[clinic end generated code: output=d70e6e2d97112844 input=09cce3fb855056b2]*/
+_sha256_sha256_impl(PyObject *module, PyObject *string)
+/*[clinic end generated code: output=fa644436dcea5c31 input=09cce3fb855056b2]*/
 {
     SHAobject *new;
     Py_buffer buf;
@@ -647,8 +646,8 @@ Return a new SHA-224 hash object; optionally initialized with a string.
 [clinic start generated code]*/
 
 static PyObject *
-_sha256_sha224_impl(PyModuleDef *module, PyObject *string)
-/*[clinic end generated code: output=f2822bf28416b42a input=27a04ba24c353a73]*/
+_sha256_sha224_impl(PyObject *module, PyObject *string)
+/*[clinic end generated code: output=21e3ba22c3404f93 input=27a04ba24c353a73]*/
 {
     SHAobject *new;
     Py_buffer buf;

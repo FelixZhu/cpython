@@ -157,9 +157,9 @@ class OrderedDict(dict):
         dict.clear(self)
 
     def popitem(self, last=True):
-        '''od.popitem() -> (k, v), return and remove a (key, value) pair.
-        Pairs are returned in LIFO order if last is true or FIFO order if false.
+        '''Remove and return a (key, value) pair from the dictionary.
 
+        Pairs are returned in LIFO order if last is true or FIFO order if false.
         '''
         if not self:
             raise KeyError('dictionary is empty')
@@ -180,15 +180,14 @@ class OrderedDict(dict):
         return key, value
 
     def move_to_end(self, key, last=True):
-        '''Move an existing element to the end (or beginning if last==False).
+        '''Move an existing element to the end (or beginning if last is false).
 
-        Raises KeyError if the element does not exist.
-        When last=True, acts like a fast version of self[key]=self.pop(key).
-
+        Raise KeyError if the element does not exist.
         '''
         link = self.__map[key]
         link_prev = link.prev
         link_next = link.next
+        soft_link = link_next.prev
         link_prev.next = link_next
         link_next.prev = link_prev
         root = self.__root
@@ -196,12 +195,14 @@ class OrderedDict(dict):
             last = root.prev
             link.prev = last
             link.next = root
-            last.next = root.prev = link
+            root.prev = soft_link
+            last.next = link
         else:
             first = root.next
             link.prev = root
             link.next = first
-            root.next = first.prev = link
+            first.prev = soft_link
+            root.next = link
 
     def __sizeof__(self):
         sizeof = _sys.getsizeof
@@ -245,7 +246,10 @@ class OrderedDict(dict):
         return default
 
     def setdefault(self, key, default=None):
-        'od.setdefault(k[,d]) -> od.get(k,d), also set od[k]=d if k not in od'
+        '''Insert key with a value of default if key is not in the dictionary.
+
+        Return the value for key if key is in the dictionary, else default.
+        '''
         if key in self:
             return self[key]
         self[key] = default
@@ -271,9 +275,7 @@ class OrderedDict(dict):
 
     @classmethod
     def fromkeys(cls, iterable, value=None):
-        '''OD.fromkeys(S[, v]) -> New ordered dictionary with keys from S.
-        If not specified, the value defaults to None.
-
+        '''Create a new ordered dictionary with keys from iterable and values set to value.
         '''
         self = cls()
         for key in iterable:
@@ -353,7 +355,7 @@ _field_template = '''\
     {name} = _property(_itemgetter({index:d}), doc='Alias for field number {index:d}')
 '''
 
-def namedtuple(typename, field_names, verbose=False, rename=False):
+def namedtuple(typename, field_names, *, verbose=False, rename=False, module=None):
     """Returns a new subclass of tuple with named fields.
 
     >>> Point = namedtuple('Point', ['x', 'y'])
@@ -365,7 +367,7 @@ def namedtuple(typename, field_names, verbose=False, rename=False):
     >>> x, y = p                        # unpack like a regular tuple
     >>> x, y
     (11, 22)
-    >>> p.x + p.y                       # fields also accessable by name
+    >>> p.x + p.y                       # fields also accessible by name
     33
     >>> d = p._asdict()                 # convert to a dictionary
     >>> d['x']
@@ -393,7 +395,7 @@ def namedtuple(typename, field_names, verbose=False, rename=False):
                 field_names[index] = '_%d' % index
             seen.add(name)
     for name in [typename] + field_names:
-        if type(name) != str:
+        if type(name) is not str:
             raise TypeError('Type names and field names must be strings')
         if not name.isidentifier():
             raise ValueError('Type names and field names must be valid '
@@ -434,11 +436,15 @@ def namedtuple(typename, field_names, verbose=False, rename=False):
     # For pickling to work, the __module__ variable needs to be set to the frame
     # where the named tuple is created.  Bypass this step in environments where
     # sys._getframe is not defined (Jython for example) or sys._getframe is not
-    # defined for arguments greater than 0 (IronPython).
-    try:
-        result.__module__ = _sys._getframe(1).f_globals.get('__name__', '__main__')
-    except (AttributeError, ValueError):
-        pass
+    # defined for arguments greater than 0 (IronPython), or where the user has
+    # specified a particular module.
+    if module is None:
+        try:
+            module = _sys._getframe(1).f_globals.get('__name__', '__main__')
+        except (AttributeError, ValueError):
+            pass
+    if module is not None:
+        result.__module__ = module
 
     return result
 
@@ -842,7 +848,7 @@ class Counter(dict):
 
 
 ########################################################################
-###  ChainMap (helper for configparser and string.Template)
+###  ChainMap
 ########################################################################
 
 class ChainMap(MutableMapping):
@@ -850,7 +856,8 @@ class ChainMap(MutableMapping):
     to create a single, updateable view.
 
     The underlying mappings are stored in a list.  That list is public and can
-    accessed or updated using the *maps* attribute.  There is no other state.
+    be accessed or updated using the *maps* attribute.  There is no other
+    state.
 
     Lookups search the underlying mappings successively until a key is found.
     In contrast, writes, updates, and deletions only operate on the first

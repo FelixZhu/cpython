@@ -85,7 +85,7 @@ call_error_callback(PyObject *errors, PyObject *exc)
     const char *str;
 
     assert(PyUnicode_Check(errors));
-    str = _PyUnicode_AsString(errors);
+    str = PyUnicode_AsUTF8(errors);
     if (str == NULL)
         return NULL;
     cb = PyCodec_LookupError(str);
@@ -138,7 +138,7 @@ codecctx_errors_set(MultibyteStatefulCodecContext *self, PyObject *value,
         return -1;
     }
 
-    str = _PyUnicode_AsString(value);
+    str = PyUnicode_AsUTF8(value);
     if (str == NULL)
         return -1;
 
@@ -793,8 +793,7 @@ encoder_encode_stateful(MultibyteStatefulEncoderContext *ctx,
                               ctx->errors, final ? MBENC_FLUSH | MBENC_RESET : 0);
     if (r == NULL) {
         /* recover the original pending buffer */
-        Py_CLEAR(ctx->pending);
-        ctx->pending = origpending;
+        Py_XSETREF(ctx->pending, origpending);
         origpending = NULL;
         goto errorexit;
     }
@@ -1612,7 +1611,7 @@ mbstreamwriter_iwrite(MultibyteStreamWriterObject *self,
     if (str == NULL)
         return -1;
 
-    wr = _PyObject_CallMethodId(self->stream, &PyId_write, "O", str);
+    wr = _PyObject_CallMethodIdObjArgs(self->stream, &PyId_write, str, NULL);
     Py_DECREF(str);
     if (wr == NULL)
         return -1;
@@ -1703,7 +1702,7 @@ _multibytecodec_MultibyteStreamWriter_reset_impl(MultibyteStreamWriterObject *se
     if (PyBytes_Size(pwrt) > 0) {
         PyObject *wr;
 
-        wr = _PyObject_CallMethodId(self->stream, &PyId_write, "O", pwrt);
+        wr = _PyObject_CallMethodIdObjArgs(self->stream, &PyId_write, pwrt);
         if (wr == NULL) {
             Py_DECREF(pwrt);
             return NULL;
@@ -1848,8 +1847,8 @@ _multibytecodec.__create_codec
 [clinic start generated code]*/
 
 static PyObject *
-_multibytecodec___create_codec(PyModuleDef *module, PyObject *arg)
-/*[clinic end generated code: output=fbe74f6510640163 input=6840b2a6b183fcfa]*/
+_multibytecodec___create_codec(PyObject *module, PyObject *arg)
+/*[clinic end generated code: output=cfa3dce8260e809d input=6840b2a6b183fcfa]*/
 {
     MultibyteCodecObject *self;
     MultibyteCodec *codec;

@@ -55,6 +55,12 @@ Dynamic Type Creation
 
    .. versionadded:: 3.3
 
+   .. versionchanged:: 3.6
+
+      The default value for the ``namespace`` element of the returned
+      tuple has changed.  Now an insertion-order-preserving mapping is
+      used when the metaclass does not have a ``__prepare__`` method,
+
 .. seealso::
 
    :ref:`metaclasses`
@@ -98,6 +104,14 @@ Standard names are defined for the following types:
    .. versionadded:: 3.5
 
 
+.. data:: AsyncGeneratorType
+
+   The type of :term:`asynchronous generator`-iterator objects, created by
+   asynchronous generator functions.
+
+   .. versionadded:: 3.6
+
+
 .. data:: CodeType
 
    .. index:: builtin: compile
@@ -116,6 +130,29 @@ Standard names are defined for the following types:
    The type of built-in functions like :func:`len` or :func:`sys.exit`, and
    methods of built-in classes.  (Here, the term "built-in" means "written in
    C".)
+
+
+.. data:: SlotWrapperType
+
+   The type of methods of some built-in data types and base classes such as
+   :meth:`object.__init__` or :meth:`object.__lt__`.
+
+   .. versionadded:: 3.7
+
+
+.. data:: MethodWrapperType
+
+   The type of *bound* methods of some built-in data types and base classes.
+   For example it is the type of :code:`object().__str__`.
+
+   .. versionadded:: 3.7
+
+
+.. data:: MethodDescriptorType
+
+   The type of methods of some built-in data types such as :meth:`str.join`.
+
+   .. versionadded:: 3.7
 
 
 .. class:: ModuleType(name, doc=None)
@@ -252,10 +289,12 @@ Additional Utility Classes and Functions
        class SimpleNamespace:
            def __init__(self, **kwargs):
                self.__dict__.update(kwargs)
+
            def __repr__(self):
                keys = sorted(self.__dict__)
                items = ("{}={!r}".format(k, self.__dict__[k]) for k in keys)
                return "{}({})".format(type(self).__name__, ", ".join(items))
+
            def __eq__(self, other):
                return self.__dict__ == other.__dict__
 

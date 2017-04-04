@@ -128,7 +128,7 @@ static PyMethodDef module_methods[] = {
     {"recv", multiprocessing_recv, METH_VARARGS, ""},
     {"send", multiprocessing_send, METH_VARARGS, ""},
 #endif
-#ifndef POSIX_SEMAPHORES_NOT_ENABLED
+#if !defined(POSIX_SEMAPHORES_NOT_ENABLED) && !defined(__ANDROID__)
     {"sem_unlink", _PyMp_sem_unlink, METH_VARARGS, ""},
 #endif
     {NULL}
@@ -171,8 +171,11 @@ PyInit__multiprocessing(void)
     {
         PyObject *py_sem_value_max;
         /* Some systems define SEM_VALUE_MAX as an unsigned value that
-         * causes it to be negative when used as an int (NetBSD). */
-        if ((int)(SEM_VALUE_MAX) < 0)
+         * causes it to be negative when used as an int (NetBSD).
+         *
+         * Issue #28152: Use (0) instead of 0 to fix a warning on dead code
+         * when using clang -Wunreachable-code. */
+        if ((int)(SEM_VALUE_MAX) < (0))
             py_sem_value_max = PyLong_FromLong(INT_MAX);
         else
             py_sem_value_max = PyLong_FromLong(SEM_VALUE_MAX);

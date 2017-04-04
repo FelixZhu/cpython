@@ -5,8 +5,6 @@
 
 /* Itertools module written and maintained
    by Raymond D. Hettinger <python@rcn.com>
-   Copyright (c) 2003-2015 Python Software Foundation.
-   All rights reserved.
 */
 
 
@@ -77,7 +75,7 @@ groupby_traverse(groupbyobject *gbo, visitproc visit, void *arg)
 static PyObject *
 groupby_next(groupbyobject *gbo)
 {
-    PyObject *newvalue, *newkey, *r, *grouper, *tmp;
+    PyObject *newvalue, *newkey, *r, *grouper;
 
     /* skip to next iteration group */
     for (;;) {
@@ -110,19 +108,12 @@ groupby_next(groupbyobject *gbo)
             }
         }
 
-        tmp = gbo->currkey;
-        gbo->currkey = newkey;
-        Py_XDECREF(tmp);
-
-        tmp = gbo->currvalue;
-        gbo->currvalue = newvalue;
-        Py_XDECREF(tmp);
+        Py_XSETREF(gbo->currkey, newkey);
+        Py_XSETREF(gbo->currvalue, newvalue);
     }
 
     Py_INCREF(gbo->currkey);
-    tmp = gbo->tgtkey;
-    gbo->tgtkey = gbo->currkey;
-    Py_XDECREF(tmp);
+    Py_XSETREF(gbo->tgtkey, gbo->currkey);
 
     grouper = _grouper_create(gbo, gbo->tgtkey);
     if (grouper == NULL)
@@ -156,17 +147,19 @@ static PyObject *
 groupby_setstate(groupbyobject *lz, PyObject *state)
 {
     PyObject *currkey, *currvalue, *tgtkey;
-    if (!PyArg_ParseTuple(state, "OOO", &currkey, &currvalue, &tgtkey))
+    if (!PyTuple_Check(state)) {
+        PyErr_SetString(PyExc_TypeError, "state is not a tuple");
         return NULL;
-    Py_CLEAR(lz->currkey);
-    lz->currkey = currkey;
-    Py_INCREF(lz->currkey);
-    Py_CLEAR(lz->currvalue);
-    lz->currvalue = currvalue;
-    Py_INCREF(lz->currvalue);
-    Py_CLEAR(lz->tgtkey);
-    lz->tgtkey = tgtkey;
-    Py_INCREF(lz->tgtkey);
+    }
+    if (!PyArg_ParseTuple(state, "OOO", &currkey, &currvalue, &tgtkey)) {
+        return NULL;
+    }
+    Py_INCREF(currkey);
+    Py_XSETREF(lz->currkey, currkey);
+    Py_INCREF(currvalue);
+    Py_XSETREF(lz->currvalue, currvalue);
+    Py_INCREF(tgtkey);
+    Py_XSETREF(lz->tgtkey, tgtkey);
     Py_RETURN_NONE;
 }
 
@@ -634,8 +627,7 @@ tee_next(teeobject *to)
         link = teedataobject_jumplink(to->dataobj);
         if (link == NULL)
             return NULL;
-        Py_DECREF(to->dataobj);
-        to->dataobj = (teedataobject *)link;
+        Py_SETREF(to->dataobj, (teedataobject *)link);
         to->index = 0;
     }
     value = teedataobject_getitem(to->dataobj, to->index);
@@ -740,15 +732,19 @@ tee_setstate(teeobject *to, PyObject *state)
 {
     teedataobject *tdo;
     int index;
-    if (!PyArg_ParseTuple(state, "O!i", &teedataobject_type, &tdo, &index))
+    if (!PyTuple_Check(state)) {
+        PyErr_SetString(PyExc_TypeError, "state is not a tuple");
         return NULL;
+    }
+    if (!PyArg_ParseTuple(state, "O!i", &teedataobject_type, &tdo, &index)) {
+        return NULL;
+    }
     if (index < 0 || index > LINKCELLS) {
         PyErr_SetString(PyExc_ValueError, "Index out of range");
         return NULL;
     }
-    Py_CLEAR(to->dataobj);
-    to->dataobj = tdo;
-    Py_INCREF(to->dataobj);
+    Py_INCREF(tdo);
+    Py_XSETREF(to->dataobj, tdo);
     to->index = index;
     Py_RETURN_NONE;
 }
@@ -985,12 +981,15 @@ cycle_setstate(cycleobject *lz, PyObject *state)
 {
     PyObject *saved=NULL;
     int firstpass;
-
-    if (!PyArg_ParseTuple(state, "O!i", &PyList_Type, &saved, &firstpass))
+    if (!PyTuple_Check(state)) {
+        PyErr_SetString(PyExc_TypeError, "state is not a tuple");
         return NULL;
+    }
+    if (!PyArg_ParseTuple(state, "O!i", &PyList_Type, &saved, &firstpass)) {
+        return NULL;
+    }
     Py_INCREF(saved);
-    Py_CLEAR(lz->saved);
-    lz->saved = saved;
+    Py_XSETREF(lz->saved, saved);
     lz->firstpass = firstpass != 0;
     lz->index = 0;
     Py_RETURN_NONE;
@@ -1918,15 +1917,22 @@ chain_setstate(chainobject *lz, PyObject *state)
 {
     PyObject *source, *active=NULL;
 
-    if (! PyArg_ParseTuple(state, "O|O", &source, &active))
+    if (!PyTuple_Check(state)) {
+        PyErr_SetString(PyExc_TypeError, "state is not a tuple");
         return NULL;
+    }
+    if (!PyArg_ParseTuple(state, "O|O", &source, &active)) {
+        return NULL;
+    }
+    if (!PyIter_Check(source) || (active != NULL && !PyIter_Check(active))) {
+        PyErr_SetString(PyExc_TypeError, "Arguments must be iterators.");
+        return NULL;
+    }
 
-    Py_CLEAR(lz->source);
-    lz->source = source;
-    Py_INCREF(lz->source);
-    Py_CLEAR(lz->active);
-    lz->active = active;
-    Py_XINCREF(lz->active);
+    Py_INCREF(source);
+    Py_XSETREF(lz->source, source);
+    Py_XINCREF(active);
+    Py_XSETREF(lz->active, active);
     Py_RETURN_NONE;
 }
 
@@ -1940,7 +1946,7 @@ iterable, until all of the iterables are exhausted.");
 PyDoc_STRVAR(chain_from_iterable_doc,
 "chain.from_iterable(iterable) --> chain object\n\
 \n\
-Alternate chain() contructor taking a single iterable argument\n\
+Alternate chain() constructor taking a single iterable argument\n\
 that evaluates lazily.");
 
 static PyMethodDef chain_methods[] = {
@@ -2283,8 +2289,7 @@ product_setstate(productobject *lz, PyObject *state)
         Py_INCREF(element);
         PyTuple_SET_ITEM(result, i, element);
     }
-    Py_CLEAR(lz->result);
-    lz->result = result;
+    Py_XSETREF(lz->result, result);
     Py_RETURN_NONE;
 }
 
@@ -2605,8 +2610,7 @@ combinations_setstate(combinationsobject *lz, PyObject *state)
         PyTuple_SET_ITEM(result, i, element);
     }
 
-    Py_CLEAR(lz->result);
-    lz->result = result;
+    Py_XSETREF(lz->result, result);
     Py_RETURN_NONE;
 }
 
@@ -2936,8 +2940,7 @@ cwr_setstate(cwrobject *lz, PyObject *state)
         Py_INCREF(element);
         PyTuple_SET_ITEM(result, i, element);
     }
-    Py_CLEAR(lz->result);
-    lz->result = result;
+    Py_XSETREF(lz->result, result);
     Py_RETURN_NONE;
 }
 
@@ -3282,10 +3285,15 @@ permutations_setstate(permutationsobject *po, PyObject *state)
     PyObject *indices, *cycles, *result;
     Py_ssize_t n, i;
 
+    if (!PyTuple_Check(state)) {
+        PyErr_SetString(PyExc_TypeError, "state is not a tuple");
+        return NULL;
+    }
     if (!PyArg_ParseTuple(state, "O!O!",
                           &PyTuple_Type, &indices,
-                          &PyTuple_Type, &cycles))
+                          &PyTuple_Type, &cycles)) {
         return NULL;
+    }
 
     n = PyTuple_GET_SIZE(po->pool);
     if (PyTuple_GET_SIZE(indices) != n || PyTuple_GET_SIZE(cycles) != po->r) {
@@ -3325,8 +3333,7 @@ permutations_setstate(permutationsobject *po, PyObject *state)
         Py_INCREF(element);
         PyTuple_SET_ITEM(result, i, element);
     }
-    Py_CLEAR(po->result);
-    po->result = result;
+    Py_XSETREF(po->result, result);
     Py_RETURN_NONE;
 }
 
@@ -3457,7 +3464,7 @@ accumulate_traverse(accumulateobject *lz, visitproc visit, void *arg)
 static PyObject *
 accumulate_next(accumulateobject *lz)
 {
-    PyObject *val, *oldtotal, *newtotal;
+    PyObject *val, *newtotal;
 
     val = (*Py_TYPE(lz->it)->tp_iternext)(lz->it);
     if (val == NULL)
@@ -3477,17 +3484,31 @@ accumulate_next(accumulateobject *lz)
     if (newtotal == NULL)
         return NULL;
 
-    oldtotal = lz->total;
-    lz->total = newtotal;
-    Py_DECREF(oldtotal);
-
     Py_INCREF(newtotal);
+    Py_SETREF(lz->total, newtotal);
     return newtotal;
 }
 
 static PyObject *
 accumulate_reduce(accumulateobject *lz)
 {
+    if (lz->total == Py_None) {
+        PyObject *it;
+
+        if (PyType_Ready(&chain_type) < 0)
+            return NULL;
+        if (PyType_Ready(&islice_type) < 0)
+            return NULL;
+        it = PyObject_CallFunction((PyObject *)&chain_type, "(O)O",
+                                   lz->total, lz->it);
+        if (it == NULL)
+            return NULL;
+        it = PyObject_CallFunction((PyObject *)Py_TYPE(lz), "NO",
+                                   it, lz->binop ? lz->binop : Py_None);
+        if (it == NULL)
+            return NULL;
+        return Py_BuildValue("O(NiO)", &islice_type, it, 1, Py_None);
+    }
     return Py_BuildValue("O(OO)O", Py_TYPE(lz),
                             lz->it, lz->binop?lz->binop:Py_None,
                             lz->total?lz->total:Py_None);
@@ -3496,9 +3517,8 @@ accumulate_reduce(accumulateobject *lz)
 static PyObject *
 accumulate_setstate(accumulateobject *lz, PyObject *state)
 {
-    Py_CLEAR(lz->total);
-    lz->total = state;
-    Py_INCREF(lz->total);
+    Py_INCREF(state);
+    Py_XSETREF(lz->total, state);
     Py_RETURN_NONE;
 }
 
@@ -3915,7 +3935,7 @@ static PyObject *
 count_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
     countobject *lz;
-    int slow_mode = 0;
+    int fast_mode;
     Py_ssize_t cnt = 0;
     PyObject *long_cnt = NULL;
     PyObject *long_step = NULL;
@@ -3932,16 +3952,26 @@ count_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
                     return NULL;
     }
 
+    fast_mode = (long_cnt == NULL || PyLong_Check(long_cnt)) &&
+                (long_step == NULL || PyLong_Check(long_step));
+
+    /* If not specified, start defaults to 0 */
     if (long_cnt != NULL) {
-        cnt = PyLong_AsSsize_t(long_cnt);
-        if ((cnt == -1 && PyErr_Occurred()) || !PyLong_Check(long_cnt)) {
-            PyErr_Clear();
-            slow_mode = 1;
+        if (fast_mode) {
+            assert(PyLong_Check(long_cnt));
+            cnt = PyLong_AsSsize_t(long_cnt);
+            if (cnt == -1 && PyErr_Occurred()) {
+                PyErr_Clear();
+                fast_mode = 0;
+            }
         }
         Py_INCREF(long_cnt);
     } else {
         cnt = 0;
         long_cnt = PyLong_FromLong(0);
+        if (long_cnt == NULL) {
+            return NULL;
+        }
     }
 
     /* If not specified, step defaults to 1 */
@@ -3957,21 +3987,24 @@ count_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     assert(long_cnt != NULL && long_step != NULL);
 
     /* Fast mode only works when the step is 1 */
-    step = PyLong_AsLong(long_step);
-    if (step != 1) {
-        slow_mode = 1;
-        if (step == -1 && PyErr_Occurred())
-            PyErr_Clear();
+    if (fast_mode) {
+        assert(PyLong_Check(long_step));
+        step = PyLong_AsLong(long_step);
+        if (step != 1) {
+            fast_mode = 0;
+            if (step == -1 && PyErr_Occurred())
+                PyErr_Clear();
+        }
     }
 
-    if (slow_mode)
-        cnt = PY_SSIZE_T_MAX;
-    else
+    if (fast_mode)
         Py_CLEAR(long_cnt);
+    else
+        cnt = PY_SSIZE_T_MAX;
 
-    assert((cnt != PY_SSIZE_T_MAX && long_cnt == NULL && !slow_mode) ||
-           (cnt == PY_SSIZE_T_MAX && long_cnt != NULL && slow_mode));
-    assert(slow_mode ||
+    assert((cnt != PY_SSIZE_T_MAX && long_cnt == NULL && fast_mode) ||
+           (cnt == PY_SSIZE_T_MAX && long_cnt != NULL && !fast_mode));
+    assert(!fast_mode ||
            (PyLong_Check(long_step) && PyLong_AS_LONG(long_step) == 1));
 
     /* create countobject structure */
@@ -4147,7 +4180,7 @@ repeat_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         return NULL;
 
     if (kwds != NULL)
-        n_kwds = PyDict_Size(kwds);
+        n_kwds = PyDict_GET_SIZE(kwds);
     /* Does user supply times argument? */
     if ((PyTuple_Size(args) + n_kwds == 2) && cnt < 0)
         cnt = 0;
@@ -4298,9 +4331,9 @@ zip_longest_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     PyObject *fillvalue = Py_None;
     Py_ssize_t tuplesize = PySequence_Length(args);
 
-    if (kwds != NULL && PyDict_CheckExact(kwds) && PyDict_Size(kwds) > 0) {
+    if (kwds != NULL && PyDict_CheckExact(kwds) && PyDict_GET_SIZE(kwds) > 0) {
         fillvalue = PyDict_GetItemString(kwds, "fillvalue");
-        if (fillvalue == NULL  ||  PyDict_Size(kwds) > 1) {
+        if (fillvalue == NULL || PyDict_GET_SIZE(kwds) > 1) {
             PyErr_SetString(PyExc_TypeError,
                 "zip_longest() got an unexpected keyword argument");
             return NULL;
@@ -4476,9 +4509,8 @@ zip_longest_reduce(ziplongestobject *lz)
 static PyObject *
 zip_longest_setstate(ziplongestobject *lz, PyObject *state)
 {
-    Py_CLEAR(lz->fillvalue);
-    lz->fillvalue = state;
-    Py_INCREF(lz->fillvalue);
+    Py_INCREF(state);
+    Py_XSETREF(lz->fillvalue, state);
     Py_RETURN_NONE;
 }
 
@@ -4493,7 +4525,7 @@ static PyMethodDef zip_longest_methods[] = {
 PyDoc_STRVAR(zip_longest_doc,
 "zip_longest(iter1 [,iter2 [...]], [fillvalue=None]) --> zip_longest object\n\
 \n\
-Return an zip_longest object whose .__next__() method returns a tuple where\n\
+Return a zip_longest object whose .__next__() method returns a tuple where\n\
 the i-th element comes from the i-th iterable argument.  The .__next__()\n\
 method continues until the longest iterable in the argument sequence\n\
 is exhausted and then it raises StopIteration.  When the shorter iterables\n\

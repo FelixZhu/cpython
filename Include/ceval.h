@@ -8,16 +8,18 @@ extern "C" {
 /* Interface to random parts in ceval.c */
 
 PyAPI_FUNC(PyObject *) PyEval_CallObjectWithKeywords(
-    PyObject *, PyObject *, PyObject *);
+    PyObject *callable,
+    PyObject *args,
+    PyObject *kwargs);
 
 /* Inline this */
-#define PyEval_CallObject(func,arg) \
-    PyEval_CallObjectWithKeywords(func, arg, (PyObject *)NULL)
+#define PyEval_CallObject(callable, arg) \
+    PyEval_CallObjectWithKeywords(callable, arg, (PyObject *)NULL)
 
-PyAPI_FUNC(PyObject *) PyEval_CallFunction(PyObject *obj,
+PyAPI_FUNC(PyObject *) PyEval_CallFunction(PyObject *callable,
                                            const char *format, ...);
 PyAPI_FUNC(PyObject *) PyEval_CallMethod(PyObject *obj,
-                                         const char *methodname,
+                                         const char *name,
                                          const char *format, ...);
 
 #ifndef Py_LIMITED_API
@@ -25,6 +27,10 @@ PyAPI_FUNC(void) PyEval_SetProfile(Py_tracefunc, PyObject *);
 PyAPI_FUNC(void) PyEval_SetTrace(Py_tracefunc, PyObject *);
 PyAPI_FUNC(void) _PyEval_SetCoroutineWrapper(PyObject *);
 PyAPI_FUNC(PyObject *) _PyEval_GetCoroutineWrapper(void);
+PyAPI_FUNC(void) _PyEval_SetAsyncGenFirstiter(PyObject *);
+PyAPI_FUNC(PyObject *) _PyEval_GetAsyncGenFirstiter(void);
+PyAPI_FUNC(void) _PyEval_SetAsyncGenFinalizer(PyObject *);
+PyAPI_FUNC(PyObject *) _PyEval_GetAsyncGenFinalizer(void);
 #endif
 
 struct _frame; /* Avoid including frameobject.h */
@@ -116,9 +122,11 @@ PyAPI_DATA(int) _Py_CheckRecursionLimit;
 PyAPI_FUNC(const char *) PyEval_GetFuncName(PyObject *);
 PyAPI_FUNC(const char *) PyEval_GetFuncDesc(PyObject *);
 
-PyAPI_FUNC(PyObject *) PyEval_GetCallStats(PyObject *);
 PyAPI_FUNC(PyObject *) PyEval_EvalFrame(struct _frame *);
 PyAPI_FUNC(PyObject *) PyEval_EvalFrameEx(struct _frame *f, int exc);
+#ifndef Py_LIMITED_API
+PyAPI_FUNC(PyObject *) _PyEval_EvalFrameDefault(struct _frame *f, int exc);
+#endif
 
 /* Interface for threads.
 
@@ -172,9 +180,11 @@ PyAPI_FUNC(void) PyEval_RestoreThread(PyThreadState *);
 
 PyAPI_FUNC(int)  PyEval_ThreadsInitialized(void);
 PyAPI_FUNC(void) PyEval_InitThreads(void);
+#ifndef Py_LIMITED_API
 PyAPI_FUNC(void) _PyEval_FiniThreads(void);
-PyAPI_FUNC(void) PyEval_AcquireLock(void);
-PyAPI_FUNC(void) PyEval_ReleaseLock(void);
+#endif /* !Py_LIMITED_API */
+PyAPI_FUNC(void) PyEval_AcquireLock(void) Py_DEPRECATED(3.2);
+PyAPI_FUNC(void) PyEval_ReleaseLock(void) /* Py_DEPRECATED(3.2) */;
 PyAPI_FUNC(void) PyEval_AcquireThread(PyThreadState *tstate);
 PyAPI_FUNC(void) PyEval_ReleaseThread(PyThreadState *tstate);
 PyAPI_FUNC(void) PyEval_ReInitThreads(void);
@@ -182,6 +192,10 @@ PyAPI_FUNC(void) PyEval_ReInitThreads(void);
 #ifndef Py_LIMITED_API
 PyAPI_FUNC(void) _PyEval_SetSwitchInterval(unsigned long microseconds);
 PyAPI_FUNC(unsigned long) _PyEval_GetSwitchInterval(void);
+#endif
+
+#ifndef Py_LIMITED_API
+PyAPI_FUNC(Py_ssize_t) _PyEval_RequestCodeExtraIndex(freefunc);
 #endif
 
 #define Py_BEGIN_ALLOW_THREADS { \

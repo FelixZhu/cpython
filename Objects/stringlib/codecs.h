@@ -1,6 +1,8 @@
 /* stringlib: codec implementations */
 
-#if STRINGLIB_IS_UNICODE
+#if !STRINGLIB_IS_UNICODE
+# error "codecs.h is specific to Unicode"
+#endif
 
 /* Mask to quickly check whether a C 'long' contains a
    non-ASCII, UTF8-encoded char. */
@@ -260,9 +262,7 @@ STRINGLIB(utf8_encoder)(PyObject *unicode,
                         Py_ssize_t size,
                         const char *errors)
 {
-#define MAX_SHORT_UNICHARS 300  /* largest size we'll do on the stack */
-
-    Py_ssize_t i;                /* index into s of next input byte */
+    Py_ssize_t i;                /* index into data of next input character */
     char *p;                     /* next free byte in output buffer */
 #if STRINGLIB_SIZEOF_CHAR > 1
     PyObject *error_handler_obj = NULL;
@@ -312,8 +312,9 @@ STRINGLIB(utf8_encoder)(PyObject *unicode,
         else if (Py_UNICODE_IS_SURROGATE(ch)) {
             Py_ssize_t startpos, endpos, newpos;
             Py_ssize_t k;
-            if (error_handler == _Py_ERROR_UNKNOWN)
+            if (error_handler == _Py_ERROR_UNKNOWN) {
                 error_handler = get_error_handler(errors);
+            }
 
             startpos = i-1;
             endpos = startpos+1;
@@ -345,7 +346,7 @@ STRINGLIB(utf8_encoder)(PyObject *unicode,
                 break;
 
             case _Py_ERROR_BACKSLASHREPLACE:
-                /* substract preallocated bytes */
+                /* subtract preallocated bytes */
                 writer.min_size -= max_char_size * (endpos - startpos);
                 p = backslashreplace(&writer, p,
                                      unicode, startpos, endpos);
@@ -355,7 +356,7 @@ STRINGLIB(utf8_encoder)(PyObject *unicode,
                 break;
 
             case _Py_ERROR_XMLCHARREFREPLACE:
-                /* substract preallocated bytes */
+                /* subtract preallocated bytes */
                 writer.min_size -= max_char_size * (endpos - startpos);
                 p = xmlcharrefreplace(&writer, p,
                                       unicode, startpos, endpos);
@@ -385,8 +386,8 @@ STRINGLIB(utf8_encoder)(PyObject *unicode,
                 if (!rep)
                     goto error;
 
-                /* substract preallocated bytes */
-                writer.min_size -= max_char_size;
+                /* subtract preallocated bytes */
+                writer.min_size -= max_char_size * (newpos - startpos);
 
                 if (PyBytes_Check(rep)) {
                     p = _PyBytesWriter_WriteBytes(&writer, p,
@@ -399,14 +400,12 @@ STRINGLIB(utf8_encoder)(PyObject *unicode,
                         goto error;
 
                     if (!PyUnicode_IS_ASCII(rep)) {
-                        raise_encode_exception(&exc, "utf-8",
-                                               unicode,
-                                               i-1, i,
+                        raise_encode_exception(&exc, "utf-8", unicode,
+                                               startpos, endpos,
                                                "surrogates not allowed");
                         goto error;
                     }
 
-                    assert(PyUnicode_KIND(rep) == PyUnicode_1BYTE_KIND);
                     p = _PyBytesWriter_WriteBytes(&writer, p,
                                                   PyUnicode_DATA(rep),
                                                   PyUnicode_GET_LENGTH(rep));
@@ -460,8 +459,6 @@ STRINGLIB(utf8_encoder)(PyObject *unicode,
     _PyBytesWriter_Dealloc(&writer);
     return NULL;
 #endif
-
-#undef MAX_SHORT_UNICHARS
 }
 
 /* The pattern for constructing UCS2-repeated masks. */
@@ -823,5 +820,3 @@ STRINGLIB(utf32_encode)(const STRINGLIB_CHAR *in,
 #undef SWAB4
 
 #endif
-
-#endif /* STRINGLIB_IS_UNICODE */

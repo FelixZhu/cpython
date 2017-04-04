@@ -10,7 +10,6 @@ sub-second periodicity (contrarily to signal()).
 
 import contextlib
 import faulthandler
-import io
 import os
 import select
 import signal
@@ -21,6 +20,7 @@ import time
 import unittest
 
 from test import support
+android_not_root = support.android_not_root
 
 @contextlib.contextmanager
 def kill_on_error(proc):
@@ -84,6 +84,9 @@ class OSEINTRTest(EINTRBaseTest):
         processes = [self.new_sleep_process() for _ in range(num)]
         for _ in range(num):
             wait_func()
+        # Call the Popen method to avoid a ResourceWarning
+        for proc in processes:
+            proc.wait()
 
     def test_wait(self):
         self._test_wait_multiple(os.wait)
@@ -95,6 +98,8 @@ class OSEINTRTest(EINTRBaseTest):
     def _test_wait_single(self, wait_func):
         proc = self.new_sleep_process()
         wait_func(proc.pid)
+        # Call the Popen method to avoid a ResourceWarning
+        proc.wait()
 
     def test_waitpid(self):
         self._test_wait_single(lambda pid: os.waitpid(pid, 0))
@@ -307,6 +312,7 @@ class SocketEINTRTest(EINTRBaseTest):
     # https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=203162
     @support.requires_freebsd_version(10, 3)
     @unittest.skipUnless(hasattr(os, 'mkfifo'), 'needs mkfifo()')
+    @unittest.skipIf(android_not_root, "mkfifo not allowed, non root user")
     def _test_open(self, do_open_close_reader, do_open_close_writer):
         filename = support.TESTFN
 
@@ -341,10 +347,12 @@ class SocketEINTRTest(EINTRBaseTest):
         self._test_open("fp = open(path, 'r')\nfp.close()",
                         self.python_open)
 
+    @unittest.skipIf(sys.platform == 'darwin', "hangs under OS X; see issue #25234")
     def os_open(self, path):
         fd = os.open(path, os.O_WRONLY)
         os.close(fd)
 
+    @unittest.skipIf(sys.platform == "darwin", "hangs under OS X; see issue #25234")
     def test_os_open(self):
         self._test_open("fd = os.open(path, os.O_RDONLY)\nos.close(fd)",
                         self.os_open)
@@ -377,7 +385,7 @@ class SignalEINTRTest(EINTRBaseTest):
     @unittest.skipUnless(hasattr(signal, 'sigwaitinfo'),
                          'need signal.sigwaitinfo()')
     def test_sigwaitinfo(self):
-        # Issue #25277, #25868: give a few miliseconds to the parent process
+        # Issue #25277, #25868: give a few milliseconds to the parent process
         # between os.write() and signal.sigwaitinfo() to works around a race
         # condition
         self.sleep_time = 0.100

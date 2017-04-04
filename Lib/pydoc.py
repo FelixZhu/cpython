@@ -28,7 +28,7 @@ to a file named "<name>.html".
 
 Module docs for core modules are assumed to be in
 
-    http://docs.python.org/X.Y/library/
+    https://docs.python.org/X.Y/library/
 
 This can be overridden by setting the PYTHONDOCS environment variable
 to a different URL or to a local directory containing the Library
@@ -350,7 +350,7 @@ def safeimport(path, forceload=0, cache={}):
         elif exc is SyntaxError:
             # A SyntaxError occurred before we could execute the module.
             raise ErrorDuringImport(value.filename, info)
-        elif exc is ImportError and value.name == path:
+        elif issubclass(exc, ImportError) and value.name == path:
             # No such module in the path.
             return None
         else:
@@ -366,7 +366,7 @@ def safeimport(path, forceload=0, cache={}):
 class Doc:
 
     PYTHONDOCS = os.environ.get("PYTHONDOCS",
-                                "http://docs.python.org/%d.%d/library"
+                                "https://docs.python.org/%d.%d/library"
                                 % sys.version_info[:2])
 
     def document(self, object, name=None, *args):
@@ -395,7 +395,9 @@ class Doc:
 
     docmodule = docclass = docroutine = docother = docproperty = docdata = fail
 
-    def getdocloc(self, object):
+    def getdocloc(self, object,
+                  basedir=os.path.join(sys.base_exec_prefix, "lib",
+                                       "python%d.%d" %  sys.version_info[:2])):
         """Return the location of module docs or None"""
 
         try:
@@ -405,8 +407,7 @@ class Doc:
 
         docloc = os.environ.get("PYTHONDOCS", self.PYTHONDOCS)
 
-        basedir = os.path.join(sys.base_exec_prefix, "lib",
-                               "python%d.%d" %  sys.version_info[:2])
+        basedir = os.path.normcase(basedir)
         if (isinstance(object, type(os)) and
             (object.__name__ in ('errno', 'exceptions', 'gc', 'imp',
                                  'marshal', 'posix', 'signal', 'sys',
@@ -414,10 +415,10 @@ class Doc:
              (file.startswith(basedir) and
               not file.startswith(os.path.join(basedir, 'site-packages')))) and
             object.__name__ not in ('xml.etree', 'test.pydoc_mod')):
-            if docloc.startswith("http://"):
-                docloc = "%s/%s" % (docloc.rstrip("/"), object.__name__)
+            if docloc.startswith(("http://", "https://")):
+                docloc = "%s/%s" % (docloc.rstrip("/"), object.__name__.lower())
             else:
-                docloc = os.path.join(docloc, object.__name__ + ".html")
+                docloc = os.path.join(docloc, object.__name__.lower() + ".html")
         else:
             docloc = None
         return docloc
@@ -908,7 +909,21 @@ class HTMLDoc(Doc):
             for base in bases:
                 parents.append(self.classlink(base, object.__module__))
             title = title + '(%s)' % ', '.join(parents)
-        doc = self.markup(getdoc(object), self.preformat, funcs, classes, mdict)
+
+        decl = ''
+        try:
+            signature = inspect.signature(object)
+        except (ValueError, TypeError):
+            signature = None
+        if signature:
+            argspec = str(signature)
+            if argspec and argspec != '()':
+                decl = name + self.escape(argspec) + '\n\n'
+
+        doc = getdoc(object)
+        if decl:
+            doc = decl + (doc or '')
+        doc = self.markup(doc, self.preformat, funcs, classes, mdict)
         doc = doc and '<tt>%s<br>&nbsp;</tt>' % doc
 
         return self.section(title, '#000000', '#ffc8d8', contents, 3, doc)
@@ -1212,9 +1227,21 @@ location listed above.
             parents = map(makename, bases)
             title = title + '(%s)' % ', '.join(parents)
 
-        doc = getdoc(object)
-        contents = doc and [doc + '\n'] or []
+        contents = []
         push = contents.append
+
+        try:
+            signature = inspect.signature(object)
+        except (ValueError, TypeError):
+            signature = None
+        if signature:
+            argspec = str(signature)
+            if argspec and argspec != '()':
+                push(name + argspec + '\n')
+
+        doc = getdoc(object)
+        if doc:
+            push(doc + '\n')
 
         # List the mro, if non-trivial.
         mro = deque(inspect.getmro(object))
@@ -1428,13 +1455,14 @@ def getpager():
         return plainpager
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         return plainpager
-    if 'PAGER' in os.environ:
+    use_pager = os.environ.get('MANPAGER') or os.environ.get('PAGER')
+    if use_pager:
         if sys.platform == 'win32': # pipes completely broken in Windows
-            return lambda text: tempfilepager(plain(text), os.environ['PAGER'])
+            return lambda text: tempfilepager(plain(text), use_pager)
         elif os.environ.get('TERM') in ('dumb', 'emacs'):
-            return lambda text: pipepager(plain(text), os.environ['PAGER'])
+            return lambda text: pipepager(plain(text), use_pager)
         else:
-            return lambda text: pipepager(text, os.environ['PAGER'])
+            return lambda text: pipepager(text, use_pager)
     if os.environ.get('TERM') in ('dumb', 'emacs'):
         return plainpager
     if sys.platform == 'win32':
@@ -1911,10 +1939,10 @@ has the same effect as typing a particular string at the help> prompt.
 
     def intro(self):
         self.output.write('''
-Welcome to Python %s's help utility!
+Welcome to Python {0}'s help utility!
 
 If this is your first time using Python, you should definitely check out
-the tutorial on the Internet at http://docs.python.org/%s/tutorial/.
+the tutorial on the Internet at http://docs.python.org/{0}/tutorial/.
 
 Enter the name of any module, keyword, or topic to get help on writing
 Python programs and using Python modules.  To quit this help utility and
@@ -1924,7 +1952,7 @@ To get a list of available modules, keywords, symbols, or topics, type
 "modules", "keywords", "symbols", or "topics".  Each module also comes
 with a one-line summary of what it does; to list the modules whose name
 or summary contain a given string such as "spam", type "modules spam".
-''' % tuple([sys.version[:3]]*2))
+'''.format('%d.%d' % sys.version_info[:2]))
 
     def list(self, items, columns=4, width=80):
         items = list(sorted(items))

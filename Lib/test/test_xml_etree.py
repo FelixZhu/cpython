@@ -18,7 +18,7 @@ import weakref
 
 from itertools import product
 from test import support
-from test.support import TESTFN, findfile, import_fresh_module, gc_collect
+from test.support import TESTFN, findfile, import_fresh_module, gc_collect, swap_attr
 
 # pyET is the pure-Python implementation.
 #
@@ -91,14 +91,16 @@ ENTITY_XML = """\
 
 
 class ModuleTest(unittest.TestCase):
-    # TODO: this should be removed once we get rid of the global module vars
-
     def test_sanity(self):
         # Import sanity.
 
         from xml.etree import ElementTree
         from xml.etree import ElementInclude
         from xml.etree import ElementPath
+
+    def test_all(self):
+        names = ("xml.etree.ElementTree", "_elementtree")
+        support.check__all__(self, ET, names, blacklist=("HTML_EMPTY",))
 
 
 def serialize(elem, to_string=True, encoding='unicode', **options):
@@ -407,6 +409,14 @@ class ElementTreeTest(unittest.TestCase):
         self.assertEqual(ET.tostring(elem),
                 b'<test testa="testval" testb="test1" testc="test2">aa</test>')
 
+        elem = ET.Element('test')
+        elem.set('a', '\r')
+        elem.set('b', '\r\n')
+        elem.set('c', '\t\n\r ')
+        elem.set('d', '\n\n')
+        self.assertEqual(ET.tostring(elem),
+                b'<test a="&#10;" b="&#10;" c="&#09;&#10;&#10; " d="&#10;&#10;" />')
+
     def test_makeelement(self):
         # Test makeelement handling.
 
@@ -569,14 +579,11 @@ class ElementTreeTest(unittest.TestCase):
             self.assertFalse(f.closed)
         self.assertEqual(str(cm.exception), "unknown event 'bogus'")
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.filterwarnings("always", category=ResourceWarning)
+        with support.check_no_resource_warning(self):
             with self.assertRaises(ValueError) as cm:
                 iterparse(SIMPLE_XMLFILE, events)
             self.assertEqual(str(cm.exception), "unknown event 'bogus'")
             del cm
-            support.gc_collect()
-        self.assertEqual(w, [])
 
         source = io.BytesIO(
             b"<?xml version='1.0' encoding='iso-8859-1'?>\n"
@@ -603,15 +610,12 @@ class ElementTreeTest(unittest.TestCase):
         it = iterparse(TESTFN)
         action, elem = next(it)
         self.assertEqual((action, elem.tag), ('end', 'document'))
-        with warnings.catch_warnings(record=True) as w:
-            warnings.filterwarnings("always", category=ResourceWarning)
+        with support.check_no_resource_warning(self):
             with self.assertRaises(ET.ParseError) as cm:
                 next(it)
             self.assertEqual(str(cm.exception),
                     'junk after document element: line 1, column 12')
             del cm, it
-            support.gc_collect()
-        self.assertEqual(w, [])
 
     def test_writefile(self):
         elem = ET.Element("tag")
@@ -1868,6 +1872,12 @@ class BadElementTest(ElementTestCase, unittest.TestCase):
         e.extend([ET.Element('bar')])
         self.assertRaises(ValueError, e.remove, X('baz'))
 
+    def test_recursive_repr(self):
+        # Issue #25455
+        e = ET.Element('foo')
+        with swap_attr(e, 'tag', e):
+            with self.assertRaises(RuntimeError):
+                repr(e)  # Should not crash
 
 class MutatingElementPath(str):
     def __new__(cls, elem, *args):
@@ -2185,8 +2195,40 @@ class ElementIterTest(unittest.TestCase):
         # make sure both tag=None and tag='*' return all tags
         all_tags = ['document', 'house', 'room', 'room',
                     'shed', 'house', 'room']
+        self.assertEqual(summarize_list(doc.iter()), all_tags)
         self.assertEqual(self._ilist(doc), all_tags)
         self.assertEqual(self._ilist(doc, '*'), all_tags)
+
+    def test_getiterator(self):
+        doc = ET.XML('''
+            <document>
+                <house>
+                    <room>bedroom1</room>
+                    <room>bedroom2</room>
+                </house>
+                <shed>nothing here
+                </shed>
+                <house>
+                    <room>bedroom8</room>
+                </house>
+            </document>''')
+
+        self.assertEqual(summarize_list(doc.getiterator('room')),
+                         ['room'] * 3)
+        self.assertEqual(summarize_list(doc.getiterator('house')),
+                         ['house'] * 2)
+
+        # test that getiterator also accepts 'tag' as a keyword arg
+        self.assertEqual(
+            summarize_list(doc.getiterator(tag='room')),
+            ['room'] * 3)
+
+        # make sure both tag=None and tag='*' return all tags
+        all_tags = ['document', 'house', 'room', 'room',
+                    'shed', 'house', 'room']
+        self.assertEqual(summarize_list(doc.getiterator()), all_tags)
+        self.assertEqual(summarize_list(doc.getiterator(None)), all_tags)
+        self.assertEqual(summarize_list(doc.getiterator('*')), all_tags)
 
     def test_copy(self):
         a = ET.Element('a')

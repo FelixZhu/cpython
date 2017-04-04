@@ -21,15 +21,22 @@ work. One should use importlib as the public-facing version of this module.
 # anything specified at the class level.
 
 # Bootstrap-related code ######################################################
-
-_CASE_INSENSITIVE_PLATFORMS = 'win', 'cygwin', 'darwin'
+_CASE_INSENSITIVE_PLATFORMS_STR_KEY = 'win',
+_CASE_INSENSITIVE_PLATFORMS_BYTES_KEY = 'cygwin', 'darwin'
+_CASE_INSENSITIVE_PLATFORMS =  (_CASE_INSENSITIVE_PLATFORMS_BYTES_KEY
+                                + _CASE_INSENSITIVE_PLATFORMS_STR_KEY)
 
 
 def _make_relax_case():
     if sys.platform.startswith(_CASE_INSENSITIVE_PLATFORMS):
+        if sys.platform.startswith(_CASE_INSENSITIVE_PLATFORMS_STR_KEY):
+            key = 'PYTHONCASEOK'
+        else:
+            key = b'PYTHONCASEOK'
+
         def _relax_case():
             """True if filenames must be checked case-insensitively."""
-            return b'PYTHONCASEOK' in _os.environ
+            return key in _os.environ
     else:
         def _relax_case():
             """True if filenames must be checked case-insensitively."""
@@ -130,10 +137,6 @@ _code_type = type(_write_atomic.__code__)
 # a .pyc file in text mode the magic number will be wrong; also, the
 # Apple MPW compiler swaps their values, botching string constants.
 #
-# The magic numbers must be spaced apart at least 2 values, as the
-# -U interpeter flag will cause MAGIC+1 being used. They have been
-# odd numbers for some time now.
-#
 # There were a variety of old schemes for setting the magic number.
 # The current working scheme is to increment the previous value by
 # 10.
@@ -223,13 +226,30 @@ _code_type = type(_write_atomic.__code__)
 #     Python 3.5b1  3330 (PEP 448: Additional Unpacking Generalizations)
 #     Python 3.5b2  3340 (fix dictionary display evaluation order #11205)
 #     Python 3.5b2  3350 (add GET_YIELD_FROM_ITER opcode #24400)
-#     Python 3.6a0  3360 (add FORMAT_VALUE opcode #25483)
+#     Python 3.5.2  3351 (fix BUILD_MAP_UNPACK_WITH_CALL opcode #27286)
+#     Python 3.6a0  3360 (add FORMAT_VALUE opcode #25483
+#     Python 3.6a0  3361 (lineno delta of code.co_lnotab becomes signed)
+#     Python 3.6a1  3370 (16 bit wordcode)
+#     Python 3.6a1  3371 (add BUILD_CONST_KEY_MAP opcode #27140)
+#     Python 3.6a1  3372 (MAKE_FUNCTION simplification, remove MAKE_CLOSURE
+#                         #27095)
+#     Python 3.6b1  3373 (add BUILD_STRING opcode #27078)
+#     Python 3.6b1  3375 (add SETUP_ANNOTATIONS and STORE_ANNOTATION opcodes
+#                         #27985)
+#     Python 3.6b1  3376 (simplify CALL_FUNCTIONs & BUILD_MAP_UNPACK_WITH_CALL)
+#     Python 3.6b1  3377 (set __class__ cell from type.__new__ #23722)
+#     Python 3.6b2  3378 (add BUILD_TUPLE_UNPACK_WITH_CALL #28257)
+#     Python 3.6rc1 3379 (more thorough __class__ validation #23722)
+#     Python 3.7a0  3390 (add LOAD_METHOD and CALL_METHOD opcodes)
 #
 # MAGIC must change whenever the bytecode emitted by the compiler may no
 # longer be understood by older implementations of the eval loop (usually
 # due to the addition of new opcodes).
+#
+# Whenever MAGIC_NUMBER is changed, the ranges in the magic_values array
+# in PC/launcher.c must also be updated.
 
-MAGIC_NUMBER = (3360).to_bytes(2, 'little') + b'\r\n'
+MAGIC_NUMBER = (3390).to_bytes(2, 'little') + b'\r\n'
 _RAW_MAGIC_NUMBER = int.from_bytes(MAGIC_NUMBER, 'little')  # For import.c
 
 _PYCACHE = '__pycache__'
@@ -266,6 +286,7 @@ def cache_from_source(path, debug_override=None, *, optimization=None):
             message = 'debug_override or optimization must be set to None'
             raise TypeError(message)
         optimization = '' if debug_override else 1
+    path = _os.fspath(path)
     head, tail = _path_split(path)
     base, sep, rest = tail.rpartition('.')
     tag = sys.implementation.cache_tag
@@ -296,6 +317,7 @@ def source_from_cache(path):
     """
     if sys.implementation.cache_tag is None:
         raise NotImplementedError('sys.implementation.cache_tag is None')
+    path = _os.fspath(path)
     head, pycache_filename = _path_split(path)
     head, pycache = _path_split(head)
     if pycache != _PYCACHE:
@@ -523,6 +545,8 @@ def spec_from_file_location(name, location=None, *, loader=None,
                 location = loader.get_filename(name)
             except ImportError:
                 pass
+    else:
+        location = _os.fspath(location)
 
     # If the location is on the filesystem, but doesn't actually exist,
     # we could return None here, indicating that the location is not
@@ -592,7 +616,7 @@ class WindowsRegistryFinder:
         else:
             registry_key = cls.REGISTRY_KEY
         key = registry_key.format(fullname=fullname,
-                                  sys_version=sys.version[:3])
+                                  sys_version='%d.%d' % sys.version_info[:2])
         try:
             with cls._open_registry(key) as hkey:
                 filepath = _winreg.QueryValue(hkey, '')
@@ -655,6 +679,7 @@ class _LoaderBasics:
         _bootstrap._call_with_frames_removed(exec, code, module.__dict__)
 
     def load_module(self, fullname):
+        """This module is deprecated."""
         return _bootstrap._load_module_shim(self, fullname)
 
 
@@ -969,6 +994,9 @@ class _NamespacePath:
     def __iter__(self):
         return iter(self._recalculate())
 
+    def __setitem__(self, index, path):
+        self._path[index] = path
+
     def __len__(self):
         return len(self._recalculate())
 
@@ -1039,11 +1067,7 @@ class PathFinder:
 
     @classmethod
     def _path_hooks(cls, path):
-        """Search sequence of hooks for a finder for 'path'.
-
-        If 'hooks' is false then use sys.path_hooks.
-
-        """
+        """Search sys.path_hooks for a finder for 'path'."""
         if sys.path_hooks is not None and not sys.path_hooks:
             _warnings.warn('sys.path_hooks is empty', ImportWarning)
         for hook in sys.path_hooks:
@@ -1125,8 +1149,10 @@ class PathFinder:
 
     @classmethod
     def find_spec(cls, fullname, path=None, target=None):
-        """find the module on sys.path or 'path' based on sys.path_hooks and
-        sys.path_importer_cache."""
+        """Try to find a spec for 'fullname' on sys.path or 'path'.
+
+        The search is based on sys.path_hooks and sys.path_importer_cache.
+        """
         if path is None:
             path = sys.path
         spec = cls._get_spec(fullname, path, target)
@@ -1206,8 +1232,10 @@ class FileFinder:
                                        submodule_search_locations=smsl)
 
     def find_spec(self, fullname, target=None):
-        """Try to find a loader for the specified module, or the namespace
-        package portions. Returns (loader, list-of-portions)."""
+        """Try to find a spec for the specified module.
+
+        Returns the matching spec, or None if not found.
+        """
         is_namespace = False
         tail_module = fullname.rpartition('.')[2]
         try:
@@ -1413,11 +1441,4 @@ def _install(_bootstrap_module):
     _setup(_bootstrap_module)
     supported_loaders = _get_supported_file_loaders()
     sys.path_hooks.extend([FileFinder.path_hook(*supported_loaders)])
-    if _os.__name__ == 'nt':
-        sys.meta_path.append(WindowsRegistryFinder)
     sys.meta_path.append(PathFinder)
-
-    # XXX We expose a couple of classes in _bootstrap for the sake of
-    # a setuptools bug (https://bitbucket.org/pypa/setuptools/issue/378).
-    _bootstrap_module.FileFinder = FileFinder
-    _bootstrap_module.SourceFileLoader = SourceFileLoader

@@ -5,11 +5,15 @@
 
 .. module:: doctest
    :synopsis: Test pieces of code within docstrings.
+
 .. moduleauthor:: Tim Peters <tim@python.org>
 .. sectionauthor:: Tim Peters <tim@python.org>
 .. sectionauthor:: Moshe Zadka <moshez@debian.org>
 .. sectionauthor:: Edward Loper <edloper@users.sourceforge.net>
 
+**Source code:** :source:`Lib/doctest.py`
+
+--------------
 
 The :mod:`doctest` module searches for pieces of text that look like interactive
 Python sessions, and then executes those sessions to verify that they work
@@ -84,14 +88,18 @@ Here's a complete but small example module::
        doctest.testmod()
 
 If you run :file:`example.py` directly from the command line, :mod:`doctest`
-works its magic::
+works its magic:
+
+.. code-block:: shell-session
 
    $ python example.py
    $
 
 There's no output!  That's normal, and it means all the examples worked.  Pass
 ``-v`` to the script, and :mod:`doctest` prints a detailed log of what
-it's trying, and prints a summary at the end::
+it's trying, and prints a summary at the end:
+
+.. code-block:: shell-session
 
    $ python example.py -v
    Trying:
@@ -105,7 +113,9 @@ it's trying, and prints a summary at the end::
        [1, 1, 2, 6, 24, 120]
    ok
 
-And so on, eventually ending with::
+And so on, eventually ending with:
+
+.. code-block:: none
 
    Trying:
        factorial(1e100)
@@ -192,7 +202,9 @@ file.  This can be done with the :func:`testfile` function::
 That short script executes and verifies any interactive Python examples
 contained in the file :file:`example.txt`.  The file content is treated as if it
 were a single giant docstring; the file doesn't need to contain a Python
-program!   For example, perhaps :file:`example.txt` contains this::
+program!   For example, perhaps :file:`example.txt` contains this:
+
+.. code-block:: none
 
    The ``example`` module
    ======================
@@ -498,9 +510,9 @@ Option Flags
 
 A number of option flags control various aspects of doctest's behavior.
 Symbolic names for the flags are supplied as module constants, which can be
-or'ed together and passed to various functions.  The names can also be used in
-:ref:`doctest directives <doctest-directives>`, and may be passed to the
-doctest command line interface via the ``-o`` option.
+:ref:`bitwise ORed <bitwise>` together and passed to various functions.
+The names can also be used in :ref:`doctest directives <doctest-directives>`,
+and may be passed to the doctest command line interface via the ``-o`` option.
 
 .. versionadded:: 3.4
    The ``-o`` command line option.
@@ -865,8 +877,9 @@ and :ref:`doctest-simple-testfile`.
    nothing at the end.  In verbose mode, the summary is detailed, else the summary
    is very brief (in fact, empty if all tests passed).
 
-   Optional argument *optionflags* (default value 0) takes the bitwise-or of
-   option flags.  See section :ref:`doctest-options`.
+   Optional argument *optionflags* (default value 0) takes the
+   :ref:`bitwise OR <bitwise>` of option flags.
+   See section :ref:`doctest-options`.
 
    Optional argument *raise_on_error* defaults to false.  If true, an exception is
    raised upon the first failure or unexpected exception in an example.  This
@@ -1086,18 +1099,19 @@ reporting flags specific to :mod:`unittest` support, via this function:
 
    Set the :mod:`doctest` reporting flags to use.
 
-   Argument *flags* takes the bitwise-or of option flags.  See section
-   :ref:`doctest-options`.  Only "reporting flags" can be used.
+   Argument *flags* takes the :ref:`bitwise OR <bitwise>` of option flags.  See
+   section :ref:`doctest-options`.  Only "reporting flags" can be used.
 
    This is a module-global setting, and affects all future doctests run by module
    :mod:`unittest`:  the :meth:`runTest` method of :class:`DocTestCase` looks at
    the option flags specified for the test case when the :class:`DocTestCase`
    instance was constructed.  If no reporting flags were specified (which is the
    typical and expected case), :mod:`doctest`'s :mod:`unittest` reporting flags are
-   or'ed into the option flags, and the option flags so augmented are passed to the
-   :class:`DocTestRunner` instance created to run the doctest.  If any reporting
-   flags were specified when the :class:`DocTestCase` instance was constructed,
-   :mod:`doctest`'s :mod:`unittest` reporting flags are ignored.
+   :ref:`bitwise ORed <bitwise>` into the option flags, and the option flags
+   so augmented are passed to the :class:`DocTestRunner` instance created to
+   run the doctest.  If any reporting flags were specified when the
+   :class:`DocTestCase` instance was constructed, :mod:`doctest`'s
+   :mod:`unittest` reporting flags are ignored.
 
    The value of the :mod:`unittest` reporting flags in effect before the function
    was called is returned by the function.
@@ -1203,7 +1217,7 @@ DocTest Objects
 
    .. attribute:: docstring
 
-      The string that the test was extracted from, or 'None' if the string is
+      The string that the test was extracted from, or ``None`` if the string is
       unavailable, or if the test was not extracted from a string.
 
 
@@ -1308,7 +1322,7 @@ DocTestFinder objects
       not specified, then ``obj.__name__`` is used.
 
       The optional parameter *module* is the module that contains the given object.
-      If the module is not specified or is None, then the test finder will attempt
+      If the module is not specified or is ``None``, then the test finder will attempt
       to automatically determine the correct module.  The object's module is used:
 
       * As a default namespace, if *globs* is not specified.

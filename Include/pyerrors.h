@@ -87,8 +87,10 @@ PyAPI_FUNC(PyObject *) PyErr_Occurred(void);
 PyAPI_FUNC(void) PyErr_Clear(void);
 PyAPI_FUNC(void) PyErr_Fetch(PyObject **, PyObject **, PyObject **);
 PyAPI_FUNC(void) PyErr_Restore(PyObject *, PyObject *, PyObject *);
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03030000
 PyAPI_FUNC(void) PyErr_GetExcInfo(PyObject **, PyObject **, PyObject **);
 PyAPI_FUNC(void) PyErr_SetExcInfo(PyObject *, PyObject *, PyObject *);
+#endif
 
 #if defined(__clang__) || \
     (defined(__GNUC_MAJOR__) && \
@@ -147,7 +149,9 @@ PyAPI_FUNC(void) _PyErr_ChainExceptions(PyObject *, PyObject *, PyObject *);
 
 PyAPI_DATA(PyObject *) PyExc_BaseException;
 PyAPI_DATA(PyObject *) PyExc_Exception;
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03050000
 PyAPI_DATA(PyObject *) PyExc_StopAsyncIteration;
+#endif
 PyAPI_DATA(PyObject *) PyExc_StopIteration;
 PyAPI_DATA(PyObject *) PyExc_GeneratorExit;
 PyAPI_DATA(PyObject *) PyExc_ArithmeticError;
@@ -160,6 +164,9 @@ PyAPI_DATA(PyObject *) PyExc_EOFError;
 PyAPI_DATA(PyObject *) PyExc_FloatingPointError;
 PyAPI_DATA(PyObject *) PyExc_OSError;
 PyAPI_DATA(PyObject *) PyExc_ImportError;
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03060000
+PyAPI_DATA(PyObject *) PyExc_ModuleNotFoundError;
+#endif
 PyAPI_DATA(PyObject *) PyExc_IndexError;
 PyAPI_DATA(PyObject *) PyExc_KeyError;
 PyAPI_DATA(PyObject *) PyExc_KeyboardInterrupt;
@@ -167,7 +174,9 @@ PyAPI_DATA(PyObject *) PyExc_MemoryError;
 PyAPI_DATA(PyObject *) PyExc_NameError;
 PyAPI_DATA(PyObject *) PyExc_OverflowError;
 PyAPI_DATA(PyObject *) PyExc_RuntimeError;
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03050000
 PyAPI_DATA(PyObject *) PyExc_RecursionError;
+#endif
 PyAPI_DATA(PyObject *) PyExc_NotImplementedError;
 PyAPI_DATA(PyObject *) PyExc_SyntaxError;
 PyAPI_DATA(PyObject *) PyExc_IndentationError;
@@ -184,6 +193,7 @@ PyAPI_DATA(PyObject *) PyExc_UnicodeTranslateError;
 PyAPI_DATA(PyObject *) PyExc_ValueError;
 PyAPI_DATA(PyObject *) PyExc_ZeroDivisionError;
 
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03030000
 PyAPI_DATA(PyObject *) PyExc_BlockingIOError;
 PyAPI_DATA(PyObject *) PyExc_BrokenPipeError;
 PyAPI_DATA(PyObject *) PyExc_ChildProcessError;
@@ -199,6 +209,7 @@ PyAPI_DATA(PyObject *) PyExc_NotADirectoryError;
 PyAPI_DATA(PyObject *) PyExc_PermissionError;
 PyAPI_DATA(PyObject *) PyExc_ProcessLookupError;
 PyAPI_DATA(PyObject *) PyExc_TimeoutError;
+#endif
 
 
 /* Compatibility aliases */
@@ -231,15 +242,17 @@ PyAPI_FUNC(PyObject *) PyErr_NoMemory(void);
 PyAPI_FUNC(PyObject *) PyErr_SetFromErrno(PyObject *);
 PyAPI_FUNC(PyObject *) PyErr_SetFromErrnoWithFilenameObject(
     PyObject *, PyObject *);
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03040000
 PyAPI_FUNC(PyObject *) PyErr_SetFromErrnoWithFilenameObjects(
     PyObject *, PyObject *, PyObject *);
+#endif
 PyAPI_FUNC(PyObject *) PyErr_SetFromErrnoWithFilename(
     PyObject *exc,
     const char *filename   /* decoded from the filesystem encoding */
     );
 #if defined(MS_WINDOWS) && !defined(Py_LIMITED_API)
 PyAPI_FUNC(PyObject *) PyErr_SetFromErrnoWithUnicodeFilename(
-    PyObject *, const Py_UNICODE *);
+    PyObject *, const Py_UNICODE *) Py_DEPRECATED(3.3);
 #endif /* MS_WINDOWS */
 
 PyAPI_FUNC(PyObject *) PyErr_Format(
@@ -254,6 +267,17 @@ PyAPI_FUNC(PyObject *) PyErr_FormatV(
     va_list vargs);
 #endif
 
+#ifndef Py_LIMITED_API
+/* Like PyErr_Format(), but saves current exception as __context__ and
+   __cause__.
+ */
+PyAPI_FUNC(PyObject *) _PyErr_FormatFromCause(
+    PyObject *exception,
+    const char *format,   /* ASCII-encoded string  */
+    ...
+    );
+#endif
+
 #ifdef MS_WINDOWS
 PyAPI_FUNC(PyObject *) PyErr_SetFromWindowsErrWithFilename(
     int ierr,
@@ -262,13 +286,15 @@ PyAPI_FUNC(PyObject *) PyErr_SetFromWindowsErrWithFilename(
 #ifndef Py_LIMITED_API
 /* XXX redeclare to use WSTRING */
 PyAPI_FUNC(PyObject *) PyErr_SetFromWindowsErrWithUnicodeFilename(
-    int, const Py_UNICODE *);
+    int, const Py_UNICODE *) Py_DEPRECATED(3.3);
 #endif
 PyAPI_FUNC(PyObject *) PyErr_SetFromWindowsErr(int);
 PyAPI_FUNC(PyObject *) PyErr_SetExcFromWindowsErrWithFilenameObject(
     PyObject *,int, PyObject *);
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03040000
 PyAPI_FUNC(PyObject *) PyErr_SetExcFromWindowsErrWithFilenameObjects(
     PyObject *,int, PyObject *, PyObject *);
+#endif
 PyAPI_FUNC(PyObject *) PyErr_SetExcFromWindowsErrWithFilename(
     PyObject *exc,
     int ierr,
@@ -276,15 +302,19 @@ PyAPI_FUNC(PyObject *) PyErr_SetExcFromWindowsErrWithFilename(
     );
 #ifndef Py_LIMITED_API
 PyAPI_FUNC(PyObject *) PyErr_SetExcFromWindowsErrWithUnicodeFilename(
-    PyObject *,int, const Py_UNICODE *);
+    PyObject *,int, const Py_UNICODE *) Py_DEPRECATED(3.3);
 #endif
 PyAPI_FUNC(PyObject *) PyErr_SetExcFromWindowsErr(PyObject *, int);
 #endif /* MS_WINDOWS */
 
-PyAPI_FUNC(PyObject *) PyErr_SetExcWithArgsKwargs(PyObject *, PyObject *,
-    PyObject *);
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03060000
+PyAPI_FUNC(PyObject *) PyErr_SetImportErrorSubclass(PyObject *, PyObject *,
+    PyObject *, PyObject *);
+#endif
+#if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03030000
 PyAPI_FUNC(PyObject *) PyErr_SetImportError(PyObject *, PyObject *,
     PyObject *);
+#endif
 
 /* Export the old function so that the existing API remains available: */
 PyAPI_FUNC(void) PyErr_BadInternalCall(void);
@@ -376,7 +406,7 @@ PyAPI_FUNC(PyObject *) PyUnicodeEncodeError_Create(
     Py_ssize_t start,
     Py_ssize_t end,
     const char *reason          /* UTF-8 encoded string */
-    );
+    ) Py_DEPRECATED(3.3);
 #endif
 
 /* create a UnicodeTranslateError object */
@@ -387,7 +417,7 @@ PyAPI_FUNC(PyObject *) PyUnicodeTranslateError_Create(
     Py_ssize_t start,
     Py_ssize_t end,
     const char *reason          /* UTF-8 encoded string */
-    );
+    ) Py_DEPRECATED(3.3);
 PyAPI_FUNC(PyObject *) _PyUnicodeTranslateError_Create(
     PyObject *object,
     Py_ssize_t start,

@@ -404,18 +404,17 @@ class OutputTestCase(unittest.TestCase):
         with support.captured_stdout() as out:
             week = [(1,0), (2,1), (3,2), (4,3), (5,4), (6,5), (7,6)]
             calendar.TextCalendar().prweek(week, 1)
-            self.assertEqual(out.getvalue().strip(), "1  2  3  4  5  6  7")
+            self.assertEqual(out.getvalue(), " 1  2  3  4  5  6  7")
 
     def test_prmonth(self):
         with support.captured_stdout() as out:
             calendar.TextCalendar().prmonth(2004, 1)
-            output = out.getvalue().strip()
-            self.assertEqual(output, result_2004_01_text.strip())
+            self.assertEqual(out.getvalue(), result_2004_01_text)
 
     def test_pryear(self):
         with support.captured_stdout() as out:
             calendar.TextCalendar().pryear(2004)
-            self.assertEqual(out.getvalue().strip(), result_2004_text.strip())
+            self.assertEqual(out.getvalue(), result_2004_text)
 
     def test_format(self):
         with support.captured_stdout() as out:
@@ -501,6 +500,27 @@ class CalendarTestCase(unittest.TestCase):
         # ensure itermonthdates doesn't overflow after datetime.MAXYEAR
         # see #15421
         list(calendar.Calendar().itermonthdates(datetime.MAXYEAR, 12))
+
+    def test_itermonthdays(self):
+        for firstweekday in range(7):
+            cal = calendar.Calendar(firstweekday)
+            # Test the extremes, see #28253 and #26650
+            for y, m in [(1, 1), (9999, 12)]:
+                days = list(cal.itermonthdays(y, m))
+                self.assertIn(len(days), (35, 42))
+        # Test a short month
+        cal = calendar.Calendar(firstweekday=3)
+        days = list(cal.itermonthdays(2001, 2))
+        self.assertEqual(days, list(range(1, 29)))
+
+    def test_itermonthdays2(self):
+        for firstweekday in range(7):
+            cal = calendar.Calendar(firstweekday)
+            # Test the extremes, see #28253 and #26650
+            for y, m in [(1, 1), (9999, 12)]:
+                days = list(cal.itermonthdays2(y, m))
+                self.assertEqual(days[0][1], firstweekday)
+                self.assertEqual(days[-1][1], (firstweekday - 1) % 7)
 
 
 class MonthCalendarTestCase(unittest.TestCase):
@@ -813,6 +833,15 @@ class CommandLineTestCase(unittest.TestCase):
         stdout = self.run_ok('-t', 'html', '--css', 'custom.css', '2004')
         self.assertIn(b'<link rel="stylesheet" type="text/css" '
                       b'href="custom.css" />', stdout)
+
+
+class MiscTestCase(unittest.TestCase):
+    def test__all__(self):
+        blacklist = {'mdays', 'January', 'February', 'EPOCH',
+                     'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY',
+                     'SATURDAY', 'SUNDAY', 'different_locale', 'c',
+                     'prweek', 'week', 'format', 'formatstring', 'main'}
+        support.check__all__(self, calendar, blacklist=blacklist)
 
 
 if __name__ == "__main__":

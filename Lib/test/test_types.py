@@ -48,6 +48,7 @@ class TypesTests(unittest.TestCase):
     def test_float_constructor(self):
         self.assertRaises(ValueError, float, '')
         self.assertRaises(ValueError, float, '5\0')
+        self.assertRaises(ValueError, float, '5_5\0')
 
     def test_zero_division(self):
         try: 5.0 / 0.0
@@ -575,6 +576,24 @@ class TypesTests(unittest.TestCase):
         self.assertGreater(object.__basicsize__, 0)
         self.assertGreater(tuple.__itemsize__, 0)
 
+    def test_slot_wrapper_types(self):
+        self.assertIsInstance(object.__init__, types.SlotWrapperType)
+        self.assertIsInstance(object.__str__, types.SlotWrapperType)
+        self.assertIsInstance(object.__lt__, types.SlotWrapperType)
+        self.assertIsInstance(int.__lt__, types.SlotWrapperType)
+
+    def test_method_wrapper_types(self):
+        self.assertIsInstance(object().__init__, types.MethodWrapperType)
+        self.assertIsInstance(object().__str__, types.MethodWrapperType)
+        self.assertIsInstance(object().__lt__, types.MethodWrapperType)
+        self.assertIsInstance((42).__lt__, types.MethodWrapperType)
+
+    def test_method_descriptor_types(self):
+        self.assertIsInstance(str.join, types.MethodDescriptorType)
+        self.assertIsInstance(list.append, types.MethodDescriptorType)
+        self.assertIsInstance(''.join, types.BuiltinMethodType)
+        self.assertIsInstance([].append, types.BuiltinMethodType)
+
 
 class MappingProxyTests(unittest.TestCase):
     mappingproxy = types.MappingProxyType
@@ -999,6 +1018,24 @@ class ClassCreationTests(unittest.TestCase):
             X = types.new_class("X", (C, int()))
         with self.assertRaises(TypeError):
             X = types.new_class("X", (int(), C))
+
+    def test_one_argument_type(self):
+        expected_message = 'type.__new__() takes exactly 3 arguments (1 given)'
+
+        # Only type itself can use the one-argument form (#27157)
+        self.assertIs(type(5), int)
+
+        class M(type):
+            pass
+        with self.assertRaises(TypeError) as cm:
+            M(5)
+        self.assertEqual(str(cm.exception), expected_message)
+
+        class N(type, metaclass=M):
+            pass
+        with self.assertRaises(TypeError) as cm:
+            N(5)
+        self.assertEqual(str(cm.exception), expected_message)
 
 
 class SimpleNamespaceTests(unittest.TestCase):

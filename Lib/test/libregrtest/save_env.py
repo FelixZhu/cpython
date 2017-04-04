@@ -67,6 +67,7 @@ class saved_test_environment:
                  'multiprocessing.process._dangling', 'threading._dangling',
                  'sysconfig._CONFIG_VARS', 'sysconfig._INSTALL_SCHEMES',
                  'files', 'locale', 'warnings.showwarning',
+                 'shutil_archive_formats', 'shutil_unpack_formats',
                 )
 
     def get_sys_argv(self):
@@ -267,6 +268,7 @@ class saved_test_environment:
     def __exit__(self, exc_type, exc_val, exc_tb):
         saved_values = self.saved_values
         del self.saved_values
+        support.gc_collect()  # Some resources use weak references
         for name, get, restore in self.resource_info():
             current = get()
             original = saved_values.pop(name)
@@ -275,11 +277,9 @@ class saved_test_environment:
                 self.changed = True
                 restore(original)
                 if not self.quiet and not self.pgo:
-                    print("Warning -- {} was modified by {}".format(
-                                                 name, self.testname),
-                                                 file=sys.stderr)
+                    print(f"Warning -- {name} was modified by {self.testname}",
+                          file=sys.stderr, flush=True)
                     if self.verbose > 1:
-                        print("  Before: {}\n  After:  {} ".format(
-                                                  original, current),
-                                                  file=sys.stderr)
+                        print(f"  Before: {original}\n  After:  {current} ",
+                              file=sys.stderr, flush=True)
         return False

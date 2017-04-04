@@ -22,12 +22,6 @@ _Py_GetRefTotal(void)
 {
     PyObject *o;
     Py_ssize_t total = _Py_RefTotal;
-    /* ignore the references to the dummy object of the dicts and sets
-       because they are not reliable and not useful (now that the
-       hash table code is well-tested) */
-    o = _PyDict_Dummy();
-    if (o != NULL)
-        total -= o->ob_refcnt;
     o = _PySet_Dummy;
     if (o != NULL)
         total -= o->ob_refcnt;
@@ -109,6 +103,15 @@ void
 dump_counts(FILE* f)
 {
     PyTypeObject *tp;
+    PyObject *xoptions, *value;
+    _Py_IDENTIFIER(showalloccount);
+
+    xoptions = PySys_GetXOptions();
+    if (xoptions == NULL)
+        return;
+    value = _PyDict_GetItemId(xoptions, &PyId_showalloccount);
+    if (value != Py_True)
+        return;
 
     for (tp = type_list; tp; tp = tp->tp_next)
         fprintf(f, "%s alloc'd: %" PY_FORMAT_SIZE_T "d, "
@@ -474,7 +477,7 @@ PyObject_Repr(PyObject *v)
 
 #ifdef Py_DEBUG
     /* PyObject_Repr() must not be called with an exception set,
-       because it may clear it (directly or indirectly) and so the
+       because it can clear it (directly or indirectly) and so the
        caller loses its exception */
     assert(!PyErr_Occurred());
 #endif
@@ -523,7 +526,7 @@ PyObject_Str(PyObject *v)
 
 #ifdef Py_DEBUG
     /* PyObject_Str() must not be called with an exception set,
-       because it may clear it (directly or indirectly) and so the
+       because it can clear it (directly or indirectly) and so the
        caller loses its exception */
     assert(!PyErr_Occurred());
 #endif
@@ -593,7 +596,7 @@ PyObject_Bytes(PyObject *v)
 
     func = _PyObject_LookupSpecial(v, &PyId___bytes__);
     if (func != NULL) {
-        result = PyObject_CallFunctionObjArgs(func, NULL);
+        result = _PyObject_CallNoArg(func);
         Py_DECREF(func);
         if (result == NULL)
             return NULL;
@@ -644,7 +647,7 @@ PyObject_Bytes(PyObject *v)
 /* Map rich comparison operators to their swapped version, e.g. LT <--> GT */
 int _Py_SwappedOp[] = {Py_GT, Py_GE, Py_EQ, Py_NE, Py_LT, Py_LE};
 
-static char *opstrings[] = {"<", "<=", "==", "!=", ">", ">="};
+static const char * const opstrings[] = {"<", "<=", "==", "!=", ">", ">="};
 
 /* Perform a rich comparison, raising TypeError when the requested comparison
    operator is not supported. */
@@ -887,10 +890,10 @@ PyObject_GetAttr(PyObject *v, PyObject *name)
     if (tp->tp_getattro != NULL)
         return (*tp->tp_getattro)(v, name);
     if (tp->tp_getattr != NULL) {
-        char *name_str = _PyUnicode_AsString(name);
+        const char *name_str = PyUnicode_AsUTF8(name);
         if (name_str == NULL)
             return NULL;
-        return (*tp->tp_getattr)(v, name_str);
+        return (*tp->tp_getattr)(v, (char *)name_str);
     }
     PyErr_Format(PyExc_AttributeError,
                  "'%.50s' object has no attribute '%U'",
@@ -931,10 +934,10 @@ PyObject_SetAttr(PyObject *v, PyObject *name, PyObject *value)
         return err;
     }
     if (tp->tp_setattr != NULL) {
-        char *name_str = _PyUnicode_AsString(name);
+        const char *name_str = PyUnicode_AsUTF8(name);
         if (name_str == NULL)
             return -1;
-        err = (*tp->tp_setattr)(v, name_str, value);
+        err = (*tp->tp_setattr)(v, (char *)name_str, value);
         Py_DECREF(name);
         return err;
     }
@@ -1022,11 +1025,99 @@ _PyObject_NextNotImplemented(PyObject *self)
     return NULL;
 }
 
-/* Generic GetAttr functions - put these in your tp_[gs]etattro slot */
+
+/* Specialized version of _PyObject_GenericGetAttrWithDict
+   specifically for the LOAD_METHOD opcode.
+
+   Return 1 if a method is found, 0 if it's a regular attribute
+   from __dict__ or something returned by using a descriptor
+   protocol.
+
+   `method` will point to the resolved attribute or NULL.  In the
+   latter case, an error will be set.
+*/
+int
+_PyObject_GetMethod(PyObject *obj, PyObject *name, PyObject **method)
+{
+    PyTypeObject *tp = Py_TYPE(obj);
+    PyObject *descr;
+    descrgetfunc f = NULL;
+    PyObject **dictptr, *dict;
+    PyObject *attr;
+    int meth_found = 0;
+
+    assert(*method == NULL);
+
+    if (Py_TYPE(obj)->tp_getattro != PyObject_GenericGetAttr
+            || !PyUnicode_Check(name)) {
+        *method = PyObject_GetAttr(obj, name);
+        return 0;
+    }
+
+    if (tp->tp_dict == NULL && PyType_Ready(tp) < 0)
+        return 0;
+
+    descr = _PyType_Lookup(tp, name);
+    if (descr != NULL) {
+        Py_INCREF(descr);
+        if (PyFunction_Check(descr) ||
+                (Py_TYPE(descr) == &PyMethodDescr_Type)) {
+            meth_found = 1;
+        } else {
+            f = descr->ob_type->tp_descr_get;
+            if (f != NULL && PyDescr_IsData(descr)) {
+                *method = f(descr, obj, (PyObject *)obj->ob_type);
+                Py_DECREF(descr);
+                return 0;
+            }
+        }
+    }
+
+    dictptr = _PyObject_GetDictPtr(obj);
+    if (dictptr != NULL && (dict = *dictptr) != NULL) {
+        Py_INCREF(dict);
+        attr = PyDict_GetItem(dict, name);
+        if (attr != NULL) {
+            Py_INCREF(attr);
+            *method = attr;
+            Py_DECREF(dict);
+            Py_XDECREF(descr);
+            return 0;
+        }
+        Py_DECREF(dict);
+    }
+
+    if (meth_found) {
+        *method = descr;
+        return 1;
+    }
+
+    if (f != NULL) {
+        *method = f(descr, obj, (PyObject *)Py_TYPE(obj));
+        Py_DECREF(descr);
+        return 0;
+    }
+
+    if (descr != NULL) {
+        *method = descr;
+        return 0;
+    }
+
+    PyErr_Format(PyExc_AttributeError,
+                 "'%.50s' object has no attribute '%U'",
+                 tp->tp_name, name);
+    return 0;
+}
+
+/* Generic GetAttr functions - put these in your tp_[gs]etattro slot. */
 
 PyObject *
 _PyObject_GenericGetAttrWithDict(PyObject *obj, PyObject *name, PyObject *dict)
 {
+    /* Make sure the logic of _PyObject_GetMethod is in sync with
+       this method.
+    */
+
     PyTypeObject *tp = Py_TYPE(obj);
     PyObject *descr = NULL;
     PyObject *res = NULL;
@@ -1040,8 +1131,7 @@ _PyObject_GenericGetAttrWithDict(PyObject *obj, PyObject *name, PyObject *dict)
                      name->ob_type->tp_name);
         return NULL;
     }
-    else
-        Py_INCREF(name);
+    Py_INCREF(name);
 
     if (tp->tp_dict == NULL) {
         if (PyType_Ready(tp) < 0)
@@ -1049,10 +1139,10 @@ _PyObject_GenericGetAttrWithDict(PyObject *obj, PyObject *name, PyObject *dict)
     }
 
     descr = _PyType_Lookup(tp, name);
-    Py_XINCREF(descr);
 
     f = NULL;
     if (descr != NULL) {
+        Py_INCREF(descr);
         f = descr->ob_type->tp_descr_get;
         if (f != NULL && PyDescr_IsData(descr)) {
             res = f(descr, obj, (PyObject *)obj->ob_type);
@@ -1072,8 +1162,9 @@ _PyObject_GenericGetAttrWithDict(PyObject *obj, PyObject *name, PyObject *dict)
                 if (tsize < 0)
                     tsize = -tsize;
                 size = _PyObject_VAR_SIZE(tp, tsize);
+                assert(size <= PY_SSIZE_T_MAX);
 
-                dictoffset += (long)size;
+                dictoffset += (Py_ssize_t)size;
                 assert(dictoffset > 0);
                 assert(dictoffset % SIZEOF_VOID_P == 0);
             }
@@ -1141,12 +1232,11 @@ _PyObject_GenericSetAttrWithDict(PyObject *obj, PyObject *name,
     Py_INCREF(name);
 
     descr = _PyType_Lookup(tp, name);
-    Py_XINCREF(descr);
 
-    f = NULL;
     if (descr != NULL) {
+        Py_INCREF(descr);
         f = descr->ob_type->tp_descr_set;
-        if (f != NULL && PyDescr_IsData(descr)) {
+        if (f != NULL) {
             res = f(descr, obj, value);
             goto done;
         }
@@ -1154,40 +1244,32 @@ _PyObject_GenericSetAttrWithDict(PyObject *obj, PyObject *name,
 
     if (dict == NULL) {
         dictptr = _PyObject_GetDictPtr(obj);
-        if (dictptr != NULL) {
-            res = _PyObjectDict_SetItem(Py_TYPE(obj), dictptr, name, value);
-            if (res < 0 && PyErr_ExceptionMatches(PyExc_KeyError))
-                PyErr_SetObject(PyExc_AttributeError, name);
+        if (dictptr == NULL) {
+            if (descr == NULL) {
+                PyErr_Format(PyExc_AttributeError,
+                             "'%.100s' object has no attribute '%U'",
+                             tp->tp_name, name);
+            }
+            else {
+                PyErr_Format(PyExc_AttributeError,
+                             "'%.50s' object attribute '%U' is read-only",
+                             tp->tp_name, name);
+            }
             goto done;
         }
+        res = _PyObjectDict_SetItem(tp, dictptr, name, value);
     }
-    if (dict != NULL) {
+    else {
         Py_INCREF(dict);
         if (value == NULL)
             res = PyDict_DelItem(dict, name);
         else
             res = PyDict_SetItem(dict, name, value);
         Py_DECREF(dict);
-        if (res < 0 && PyErr_ExceptionMatches(PyExc_KeyError))
-            PyErr_SetObject(PyExc_AttributeError, name);
-        goto done;
     }
+    if (res < 0 && PyErr_ExceptionMatches(PyExc_KeyError))
+        PyErr_SetObject(PyExc_AttributeError, name);
 
-    if (f != NULL) {
-        res = f(descr, obj, value);
-        goto done;
-    }
-
-    if (descr == NULL) {
-        PyErr_Format(PyExc_AttributeError,
-                     "'%.100s' object has no attribute '%U'",
-                     tp->tp_name, name);
-        goto done;
-    }
-
-    PyErr_Format(PyExc_AttributeError,
-                 "'%.50s' object attribute '%U' is read-only",
-                 tp->tp_name, name);
   done:
     Py_XDECREF(descr);
     Py_DECREF(name);
@@ -1203,7 +1285,7 @@ PyObject_GenericSetAttr(PyObject *obj, PyObject *name, PyObject *value)
 int
 PyObject_GenericSetDict(PyObject *obj, PyObject *value, void *context)
 {
-    PyObject *dict, **dictptr = _PyObject_GetDictPtr(obj);
+    PyObject **dictptr = _PyObject_GetDictPtr(obj);
     if (dictptr == NULL) {
         PyErr_SetString(PyExc_AttributeError,
                         "This object has no __dict__");
@@ -1219,10 +1301,8 @@ PyObject_GenericSetDict(PyObject *obj, PyObject *value, void *context)
                      "not a '%.200s'", Py_TYPE(value)->tp_name);
         return -1;
     }
-    dict = *dictptr;
-    Py_XINCREF(value);
-    *dictptr = value;
-    Py_XDECREF(dict);
+    Py_INCREF(value);
+    Py_XSETREF(*dictptr, value);
     return 0;
 }
 
@@ -1322,7 +1402,7 @@ _dir_object(PyObject *obj)
         return NULL;
     }
     /* use __dir__ */
-    result = PyObject_CallFunctionObjArgs(dirfunc, NULL);
+    result = _PyObject_CallNoArg(dirfunc);
     Py_DECREF(dirfunc);
     if (result == NULL)
         return NULL;
@@ -1374,7 +1454,7 @@ none_dealloc(PyObject* ignore)
 static PyObject *
 none_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
-    if (PyTuple_GET_SIZE(args) || (kwargs && PyDict_Size(kwargs))) {
+    if (PyTuple_GET_SIZE(args) || (kwargs && PyDict_GET_SIZE(kwargs))) {
         PyErr_SetString(PyExc_TypeError, "NoneType takes no arguments");
         return NULL;
     }
@@ -1493,7 +1573,7 @@ static PyMethodDef notimplemented_methods[] = {
 static PyObject *
 notimplemented_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
-    if (PyTuple_GET_SIZE(args) || (kwargs && PyDict_Size(kwargs))) {
+    if (PyTuple_GET_SIZE(args) || (kwargs && PyDict_GET_SIZE(kwargs))) {
         PyErr_SetString(PyExc_TypeError, "NotImplementedType takes no arguments");
         return NULL;
     }
@@ -1605,6 +1685,15 @@ _Py_ReadyTypes(void)
 
     if (PyType_Ready(&PyDict_Type) < 0)
         Py_FatalError("Can't initialize dict type");
+
+    if (PyType_Ready(&PyDictKeys_Type) < 0)
+        Py_FatalError("Can't initialize dict keys type");
+
+    if (PyType_Ready(&PyDictValues_Type) < 0)
+        Py_FatalError("Can't initialize dict values type");
+
+    if (PyType_Ready(&PyDictItems_Type) < 0)
+        Py_FatalError("Can't initialize dict items type");
 
     if (PyType_Ready(&PyODict_Type) < 0)
         Py_FatalError("Can't initialize OrderedDict type");
@@ -1864,7 +1953,7 @@ _PyObject_DebugTypeStats(FILE *out)
 
 /* These methods are used to control infinite recursion in repr, str, print,
    etc.  Container objects that may recursively contain themselves,
-   e.g. builtin dictionaries and lists, should used Py_ReprEnter() and
+   e.g. builtin dictionaries and lists, should use Py_ReprEnter() and
    Py_ReprLeave() to avoid infinite recursion.
 
    Py_ReprEnter() returns 0 the first time it is called for a particular

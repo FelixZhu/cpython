@@ -4,6 +4,7 @@
 .. module:: sys
    :synopsis: Access system-specific parameters and functions.
 
+--------------
 
 This module provides access to some variables used or maintained by the
 interpreter and to functions that interact strongly with the interpreter. It is
@@ -403,6 +404,15 @@ always available.
    .. versionadded:: 3.4
 
 
+.. function:: getandroidapilevel()
+
+   Return the build time API version of Android as an integer.
+
+   Availability: Android.
+
+   .. versionadded:: 3.7
+
+
 .. function:: getcheckinterval()
 
    Return the interpreter's "check interval"; see :func:`setcheckinterval`.
@@ -427,25 +437,42 @@ always available.
 
 .. function:: getfilesystemencoding()
 
-   Return the name of the encoding used to convert Unicode filenames into
-   system file names. The result value depends on the operating system:
+   Return the name of the encoding used to convert between Unicode
+   filenames and bytes filenames. For best compatibility, str should be
+   used for filenames in all cases, although representing filenames as bytes
+   is also supported. Functions accepting or returning filenames should support
+   either str or bytes and internally convert to the system's preferred
+   representation.
+
+   This encoding is always ASCII-compatible.
+
+   :func:`os.fsencode` and :func:`os.fsdecode` should be used to ensure that
+   the correct encoding and errors mode are used.
 
    * On Mac OS X, the encoding is ``'utf-8'``.
 
-   * On Unix, the encoding is the user's preference according to the result of
-     nl_langinfo(CODESET).
+   * On Unix, the encoding is the locale encoding.
 
-   * On Windows NT+, file names are Unicode natively, so no conversion is
-     performed. :func:`getfilesystemencoding` still returns ``'mbcs'``, as
-     this is the encoding that applications should use when they explicitly
-     want to convert Unicode strings to byte strings that are equivalent when
-     used as file names.
-
-   * On Windows 9x, the encoding is ``'mbcs'``.
+   * On Windows, the encoding may be ``'utf-8'`` or ``'mbcs'``, depending
+     on user configuration.
 
    .. versionchanged:: 3.2
       :func:`getfilesystemencoding` result cannot be ``None`` anymore.
 
+   .. versionchanged:: 3.6
+      Windows is no longer guaranteed to return ``'mbcs'``. See :pep:`529`
+      and :func:`_enablelegacywindowsfsencoding` for more information.
+
+.. function:: getfilesystemencodeerrors()
+
+   Return the name of the error mode used to convert between Unicode filenames
+   and bytes filenames. The encoding name is returned from
+   :func:`getfilesystemencoding`.
+
+   :func:`os.fsencode` and :func:`os.fsdecode` should be used to ensure that
+   the correct encoding and errors mode are used.
+
+   .. versionadded:: 3.6
 
 .. function:: getrefcount(object)
 
@@ -479,7 +506,7 @@ always available.
    additional garbage collector overhead if the object is managed by the garbage
    collector.
 
-   See `recursive sizeof recipe <http://code.activestate.com/recipes/577504>`_
+   See `recursive sizeof recipe <https://code.activestate.com/recipes/577504>`_
    for an example of using :func:`getsizeof` recursively to find the size of
    containers and all their contents.
 
@@ -534,26 +561,15 @@ always available.
    Return a named tuple describing the Windows version
    currently running.  The named elements are *major*, *minor*,
    *build*, *platform*, *service_pack*, *service_pack_minor*,
-   *service_pack_major*, *suite_mask*, and *product_type*.
-   *service_pack* contains a string while all other values are
+   *service_pack_major*, *suite_mask*, *product_type* and
+   *platform_version*. *service_pack* contains a string,
+   *platform_version* a 3-tuple and all other values are
    integers. The components can also be accessed by name, so
    ``sys.getwindowsversion()[0]`` is equivalent to
    ``sys.getwindowsversion().major``. For compatibility with prior
    versions, only the first 5 elements are retrievable by indexing.
 
-   *platform* may be one of the following values:
-
-   +-----------------------------------------+-------------------------+
-   | Constant                                | Platform                |
-   +=========================================+=========================+
-   | :const:`0 (VER_PLATFORM_WIN32s)`        | Win32s on Windows 3.1   |
-   +-----------------------------------------+-------------------------+
-   | :const:`1 (VER_PLATFORM_WIN32_WINDOWS)` | Windows 95/98/ME        |
-   +-----------------------------------------+-------------------------+
-   | :const:`2 (VER_PLATFORM_WIN32_NT)`      | Windows NT/2000/XP/x64  |
-   +-----------------------------------------+-------------------------+
-   | :const:`3 (VER_PLATFORM_WIN32_CE)`      | Windows CE              |
-   +-----------------------------------------+-------------------------+
+   *platform* will be :const:`2 (VER_PLATFORM_WIN32_NT)`.
 
    *product_type* may be one of the following values:
 
@@ -569,16 +585,40 @@ always available.
    |                                       | a domain controller.            |
    +---------------------------------------+---------------------------------+
 
-
    This function wraps the Win32 :c:func:`GetVersionEx` function; see the
    Microsoft documentation on :c:func:`OSVERSIONINFOEX` for more information
    about these fields.
+
+   *platform_version* returns the accurate major version, minor version and
+   build number of the current operating system, rather than the version that
+   is being emulated for the process. It is intended for use in logging rather
+   than for feature detection.
 
    Availability: Windows.
 
    .. versionchanged:: 3.2
       Changed to a named tuple and added *service_pack_minor*,
       *service_pack_major*, *suite_mask*, and *product_type*.
+
+   .. versionchanged:: 3.6
+      Added *platform_version*
+
+
+.. function:: get_asyncgen_hooks()
+
+   Returns an *asyncgen_hooks* object, which is similar to a
+   :class:`~collections.namedtuple` of the form `(firstiter, finalizer)`,
+   where *firstiter* and *finalizer* are expected to be either ``None`` or
+   functions which take an :term:`asynchronous generator iterator` as an
+   argument, and are used to schedule finalization of an asychronous
+   generator by an event loop.
+
+   .. versionadded:: 3.6
+      See :pep:`525` for more details.
+
+   .. note::
+      This function has been added on a provisional basis (see :pep:`411`
+      for details.)
 
 
 .. function:: get_coroutine_wrapper()
@@ -1085,17 +1125,23 @@ always available.
       implementation platform, rather than part of the language definition, and
       thus may not be available in all Python implementations.
 
+.. function:: set_asyncgen_hooks(firstiter, finalizer)
 
-.. function:: settscdump(on_flag)
+   Accepts two optional keyword arguments which are callables that accept an
+   :term:`asynchronous generator iterator` as an argument. The *firstiter*
+   callable will be called when an asynchronous generator is iterated for the
+   first time. The *finalizer* will be called when an asynchronous generator
+   is about to be garbage collected.
 
-   Activate dumping of VM measurements using the Pentium timestamp counter, if
-   *on_flag* is true. Deactivate these dumps if *on_flag* is off. The function is
-   available only if Python was compiled with ``--with-tsc``. To understand
-   the output of this dump, read :file:`Python/ceval.c` in the Python sources.
+   .. versionadded:: 3.6
+      See :pep:`525` for more details, and for a reference example of a
+      *finalizer* method see the implementation of
+      ``asyncio.Loop.shutdown_asyncgens`` in
+      :source:`Lib/asyncio/base_events.py`
 
-   .. impl-detail::
-      This function is intimately bound to CPython implementation details and
-      thus not likely to be implemented elsewhere.
+   .. note::
+      This function has been added on a provisional basis (see :pep:`411`
+      for details.)
 
 
 .. function:: set_coroutine_wrapper(wrapper)
@@ -1137,6 +1183,18 @@ always available.
       This function has been added on a provisional basis (see :pep:`411`
       for details.)  Use it only for debugging purposes.
 
+.. function:: _enablelegacywindowsfsencoding()
+
+   Changes the default filesystem encoding and errors mode to 'mbcs' and
+   'replace' respectively, for consistency with versions of Python prior to 3.6.
+
+   This is equivalent to defining the :envvar:`PYTHONLEGACYWINDOWSFSENCODING`
+   environment variable before launching Python.
+
+   Availability: Windows
+
+   .. versionadded:: 3.6
+      See :pep:`529` for more details.
 
 .. data:: stdin
           stdout
@@ -1196,7 +1254,7 @@ always available.
    .. note::
        Under some conditions ``stdin``, ``stdout`` and ``stderr`` as well as the
        original values ``__stdin__``, ``__stdout__`` and ``__stderr__`` can be
-       None. It is usually the case for Windows GUI apps that aren't connected
+       ``None``. It is usually the case for Windows GUI apps that aren't connected
        to a console and Python apps started with :program:`pythonw`.
 
 
@@ -1286,7 +1344,9 @@ always available.
 
    A dictionary of the various implementation-specific flags passed through
    the :option:`-X` command-line option.  Option names are either mapped to
-   their values, if given explicitly, or to :const:`True`.  Example::
+   their values, if given explicitly, or to :const:`True`.  Example:
+
+   .. code-block:: shell-session
 
       $ ./python -Xa=b -Xc
       Python 3.2a3+ (py3k, Oct 16 2010, 20:14:50)

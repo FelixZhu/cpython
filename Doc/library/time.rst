@@ -4,6 +4,7 @@
 .. module:: time
    :synopsis: Time access and conversions.
 
+--------------
 
 This module provides various time-related functions. For related
 functionality, see also the :mod:`datetime` and :mod:`calendar` modules.
@@ -81,6 +82,10 @@ An explanation of some terminology and conventions is in order.
      The :class:`struct_time` type was extended to provide the :attr:`tm_gmtoff`
      and :attr:`tm_zone` attributes when platform supports corresponding
      ``struct tm`` members.
+
+  .. versionchanged:: 3.6
+     The :class:`struct_time` attributes :attr:`tm_gmtoff` and :attr:`tm_zone`
+     are now available on all platforms.
 
 * Use the following functions to convert between time representations:
 
@@ -555,17 +560,15 @@ The module defines the following functions and data items:
    +-------+-------------------+---------------------------------+
 
    Note that unlike the C structure, the month value is a range of [1, 12], not
-   [0, 11].  A ``-1`` argument as the daylight
-   savings flag, passed to :func:`mktime` will usually result in the correct
-   daylight savings state to be filled in.
+   [0, 11].
+
+   In calls to :func:`mktime`, :attr:`tm_isdst` may be set to 1 when daylight
+   savings time is in effect, and 0 when it is not.  A value of -1 indicates that
+   this is not known, and will usually result in the correct state being filled in.
 
    When a tuple with an incorrect length is passed to a function expecting a
    :class:`struct_time`, or having elements of the wrong type, a
    :exc:`TypeError` is raised.
-
-  .. versionchanged:: 3.3
-     :attr:`tm_gmtoff` and :attr:`tm_zone` attributes are available on platforms
-     with C library supporting the corresponding fields in ``struct tm``.
 
 .. function:: time()
 
@@ -591,8 +594,13 @@ The module defines the following functions and data items:
 
 .. function:: tzset()
 
-   Resets the time conversion rules used by the library routines. The environment
-   variable :envvar:`TZ` specifies how this is done.
+   Reset the time conversion rules used by the library routines. The environment
+   variable :envvar:`TZ` specifies how this is done. It will also set the variables
+   ``tzname`` (from the :envvar:`TZ` environment variable), ``timezone`` (non-DST
+   seconds West of UTC), ``altzone`` (DST seconds west of UTC) and ``daylight``
+   (to 0 if this timezone does not have any daylight saving time rules, or to
+   nonzero if there is a time, past, present or future when daylight saving time
+   applies).
 
    Availability: Unix.
 

@@ -10,6 +10,7 @@ import codecs
 import gc
 import sysconfig
 import platform
+import locale
 
 # count the number of test runs, used to create unique
 # strings to intern in test_intern()
@@ -627,6 +628,8 @@ class SysModuleTest(unittest.TestCase):
 
     @unittest.skipUnless(test.support.FS_NONASCII,
                          'requires OS support of non-ASCII encodings')
+    @unittest.skipUnless(sys.getfilesystemencoding() == locale.getpreferredencoding(False),
+                         'requires FS encoding to match locale')
     def test_ioencoding_nonascii(self):
         env = dict(os.environ)
 
@@ -644,7 +647,7 @@ class SysModuleTest(unittest.TestCase):
         self.assertEqual(os.path.abspath(sys.executable), sys.executable)
 
         # Issue #7774: Ensure that sys.executable is an empty string if argv[0]
-        # has been set to an non existent program name and Python is unable to
+        # has been set to a non existent program name and Python is unable to
         # retrieve the real program name
 
         # For a normal installation, it should work without 'cwd'
@@ -669,8 +672,6 @@ class SysModuleTest(unittest.TestCase):
         fs_encoding = sys.getfilesystemencoding()
         if sys.platform == 'darwin':
             expected = 'utf-8'
-        elif sys.platform == 'win32':
-            expected = 'mbcs'
         else:
             expected = None
         self.check_fsencoding(fs_encoding, expected)
@@ -691,8 +692,10 @@ class SysModuleTest(unittest.TestCase):
         args = [sys.executable, "-c", code]
         if isolated:
             args.append("-I")
-        elif encoding:
+        if encoding is not None:
             env['PYTHONIOENCODING'] = encoding
+        else:
+            env.pop('PYTHONIOENCODING', None)
         p = subprocess.Popen(args,
                               stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT,
@@ -709,14 +712,31 @@ class SysModuleTest(unittest.TestCase):
                          'stderr: backslashreplace\n')
 
         # replace the default error handler
-        out = self.c_locale_get_error_handler(encoding=':strict')
+        out = self.c_locale_get_error_handler(encoding=':ignore')
+        self.assertEqual(out,
+                         'stdin: ignore\n'
+                         'stdout: ignore\n'
+                         'stderr: backslashreplace\n')
+
+        # force the encoding
+        out = self.c_locale_get_error_handler(encoding='iso8859-1')
+        self.assertEqual(out,
+                         'stdin: strict\n'
+                         'stdout: strict\n'
+                         'stderr: backslashreplace\n')
+        out = self.c_locale_get_error_handler(encoding='iso8859-1:')
         self.assertEqual(out,
                          'stdin: strict\n'
                          'stdout: strict\n'
                          'stderr: backslashreplace\n')
 
-        # force the encoding
-        out = self.c_locale_get_error_handler(encoding='iso8859-1')
+        # have no any effect
+        out = self.c_locale_get_error_handler(encoding=':')
+        self.assertEqual(out,
+                         'stdin: surrogateescape\n'
+                         'stdout: surrogateescape\n'
+                         'stderr: backslashreplace\n')
+        out = self.c_locale_get_error_handler(encoding='')
         self.assertEqual(out,
                          'stdin: surrogateescape\n'
                          'stdout: surrogateescape\n'
@@ -784,6 +804,7 @@ class SysModuleTest(unittest.TestCase):
         c = sys.getallocatedblocks()
         self.assertIn(c, range(b - 50, b + 50))
 
+    @test.support.requires_type_collecting
     def test_is_finalizing(self):
         self.assertIs(sys.is_finalizing(), False)
         # Don't use the atexit module because _Py_Finalizing is only set
@@ -804,6 +825,13 @@ class SysModuleTest(unittest.TestCase):
         """
         rc, stdout, stderr = assert_python_ok('-c', code)
         self.assertEqual(stdout.rstrip(), b'True')
+
+    @unittest.skipUnless(hasattr(sys, 'getandroidapilevel'),
+                         'need sys.getandroidapilevel()')
+    def test_getandroidapilevel(self):
+        level = sys.getandroidapilevel()
+        self.assertIsInstance(level, int)
+        self.assertGreater(level, 0)
 
 
 @test.support.cpython_only
@@ -892,13 +920,13 @@ class SizeofTest(unittest.TestCase):
             return inner
         check(get_cell().__closure__[0], size('P'))
         # code
-        check(get_cell().__code__, size('5i9Pi3P'))
-        check(get_cell.__code__, size('5i9Pi3P'))
+        check(get_cell().__code__, size('6i13P'))
+        check(get_cell.__code__, size('6i13P'))
         def get_cell2(x):
             def inner():
                 return x
             return inner
-        check(get_cell2.__code__, size('5i9Pi3P') + 1)
+        check(get_cell2.__code__, size('6i13P') + calcsize('n'))
         # complex
         check(complex(0,1), size('2d'))
         # method_descriptor (descriptor object)
@@ -916,9 +944,9 @@ class SizeofTest(unittest.TestCase):
         # method-wrapper (descriptor object)
         check({}.__iter__, size('2P'))
         # dict
-        check({}, size('n2P') + calcsize('2nPn') + 8*calcsize('n2P'))
+        check({}, size('nQ2P') + calcsize('2nP2n') + 8 + (8*2//3)*calcsize('n2P'))
         longdict = {1:1, 2:2, 3:3, 4:4, 5:5, 6:6, 7:7, 8:8}
-        check(longdict, size('n2P') + calcsize('2nPn') + 16*calcsize('n2P'))
+        check(longdict, size('nQ2P') + calcsize('2nP2n') + 16 + (16*2//3)*calcsize('n2P'))
         # dictionary-keyview
         check({}.keys(), size('P'))
         # dictionary-valueview
@@ -1064,22 +1092,25 @@ class SizeofTest(unittest.TestCase):
         check((1,2,3), vsize('') + 3*self.P)
         # type
         # static type: PyTypeObject
-        s = vsize('P2n15Pl4Pn9Pn11PIP')
+        fmt = 'P2n15Pl4Pn9Pn11PIP'
+        if hasattr(sys, 'getcounts'):
+            fmt += '3n2P'
+        s = vsize(fmt)
         check(int, s)
-        s = vsize('P2n15Pl4Pn9Pn11PIP'  # PyTypeObject
+        s = vsize(fmt +                 # PyTypeObject
                   '3P'                  # PyAsyncMethods
                   '36P'                 # PyNumberMethods
                   '3P'                  # PyMappingMethods
                   '10P'                 # PySequenceMethods
                   '2P'                  # PyBufferProcs
                   '4P')
-        # Separate block for PyDictKeysObject with 4 entries
-        s += calcsize("2nPn") + 4*calcsize("n2P")
+        # Separate block for PyDictKeysObject with 8 keys and 5 entries
+        s += calcsize("2nP2n") + 8 + 5*calcsize("n2P")
         # class
         class newstyleclass(object): pass
         check(newstyleclass, s)
         # dict with shared keys
-        check(newstyleclass().__dict__, size('n2P' + '2nPn'))
+        check(newstyleclass().__dict__, size('nQ2P' + '2nP2n'))
         # unicode
         # each tuple contains a string and its expected character size
         # don't put any static strings here, as they may contain
@@ -1167,6 +1198,32 @@ class SizeofTest(unittest.TestCase):
         # XXX
         # sys.flags
         check(sys.flags, vsize('') + self.P * len(sys.flags))
+
+    def test_asyncgen_hooks(self):
+        old = sys.get_asyncgen_hooks()
+        self.assertIsNone(old.firstiter)
+        self.assertIsNone(old.finalizer)
+
+        firstiter = lambda *a: None
+        sys.set_asyncgen_hooks(firstiter=firstiter)
+        hooks = sys.get_asyncgen_hooks()
+        self.assertIs(hooks.firstiter, firstiter)
+        self.assertIs(hooks[0], firstiter)
+        self.assertIs(hooks.finalizer, None)
+        self.assertIs(hooks[1], None)
+
+        finalizer = lambda *a: None
+        sys.set_asyncgen_hooks(finalizer=finalizer)
+        hooks = sys.get_asyncgen_hooks()
+        self.assertIs(hooks.firstiter, firstiter)
+        self.assertIs(hooks[0], firstiter)
+        self.assertIs(hooks.finalizer, finalizer)
+        self.assertIs(hooks[1], finalizer)
+
+        sys.set_asyncgen_hooks(*old)
+        cur = sys.get_asyncgen_hooks()
+        self.assertIsNone(cur.firstiter)
+        self.assertIsNone(cur.finalizer)
 
 
 def test_main():

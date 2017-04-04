@@ -1,11 +1,14 @@
-:mod:`selectors` -- High-level I/O multiplexing
-===============================================
+:mod:`selectors` --- High-level I/O multiplexing
+================================================
 
 .. module:: selectors
    :synopsis: High-level I/O multiplexing.
 
 .. versionadded:: 3.4
 
+**Source code:** :source:`Lib/selectors.py`
+
+--------------
 
 Introduction
 ------------

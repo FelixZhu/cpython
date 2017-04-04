@@ -85,7 +85,7 @@ __all__ = [
     "TreeBuilder",
     "VERSION",
     "XML", "XMLID",
-    "XMLParser",
+    "XMLParser", "XMLPullParser",
     "register_namespace",
     ]
 
@@ -1030,7 +1030,7 @@ def register_namespace(prefix, uri):
     ValueError is raised if prefix is reserved or is invalid.
 
     """
-    if re.match("ns\d+$", prefix):
+    if re.match(r"ns\d+$", prefix):
         raise ValueError("Prefix format reserved for internal use")
     for k, v in list(_namespace_map.items()):
         if k == uri or v == prefix:
@@ -1084,8 +1084,19 @@ def _escape_attrib(text):
             text = text.replace(">", "&gt;")
         if "\"" in text:
             text = text.replace("\"", "&quot;")
+        # The following business with carriage returns is to satisfy
+        # Section 2.11 of the XML specification, stating that
+        # CR or CR LN should be replaced with just LN
+        # http://www.w3.org/TR/REC-xml/#sec-line-ends
+        if "\r\n" in text:
+            text = text.replace("\r\n", "\n")
+        if "\r" in text:
+            text = text.replace("\r", "\n")
+        #The following four lines are issue 17582
         if "\n" in text:
             text = text.replace("\n", "&#10;")
+        if "\t" in text:
+            text = text.replace("\t", "&#09;")
         return text
     except (TypeError, AttributeError):
         _raise_serialization_error(text)
@@ -1424,7 +1435,7 @@ class TreeBuilder:
 class XMLParser:
     """Element structure builder for XML source data based on the expat parser.
 
-    *html* are predefined HTML entities (not supported currently),
+    *html* are predefined HTML entities (deprecated and not supported),
     *target* is an optional target object which defaults to an instance of the
     standard TreeBuilder class, *encoding* is an optional encoding string
     which if given, overrides the encoding specified in the XML file:

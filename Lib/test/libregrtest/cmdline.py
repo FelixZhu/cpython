@@ -112,6 +112,8 @@ resources to test.  Currently only the following are defined:
 
     gui -       Run tests that require a running GUI.
 
+    tzdata -    Run tests that require timezone data.
+
 To enable all resources except one, use '-uall,-<resource>'.  For
 example, to run all the tests except for the gui tests, give the
 option '-uall,-gui'.
@@ -119,7 +121,7 @@ option '-uall,-gui'.
 
 
 RESOURCE_NAMES = ('audio', 'curses', 'largefile', 'network',
-                  'decimal', 'cpu', 'subprocess', 'urlfetch', 'gui')
+                  'decimal', 'cpu', 'subprocess', 'urlfetch', 'gui', 'tzdata')
 
 class _ArgParser(argparse.ArgumentParser):
 
@@ -166,7 +168,7 @@ def _create_parser():
                        help='display test output on failure')
     group.add_argument('-q', '--quiet', action='store_true',
                        help='no output unless one or more tests fail')
-    group.add_argument('-o', '--slow', action='store_true', dest='print_slow',
+    group.add_argument('-o', '--slowest', action='store_true', dest='print_slow',
                        help='print the slowest 10 tests')
     group.add_argument('--header', action='store_true',
                        help='print header with interpreter info')
@@ -240,9 +242,6 @@ def _create_parser():
     group.add_argument('-P', '--pgo', dest='pgo', action='store_true',
                        help='enable Profile Guided Optimization training')
 
-    parser.add_argument('args', nargs=argparse.REMAINDER,
-                        help=argparse.SUPPRESS)
-
     return parser
 
 
@@ -292,13 +291,19 @@ def _parse_args(args, **kwargs):
         ns.use_resources = []
 
     parser = _create_parser()
-    parser.parse_args(args=args, namespace=ns)
+    # Issue #14191: argparse doesn't support "intermixed" positional and
+    # optional arguments. Use parse_known_args() as workaround.
+    ns.args = parser.parse_known_args(args=args, namespace=ns)[1]
+    for arg in ns.args:
+        if arg.startswith('-'):
+            parser.error("unrecognized arguments: %s" % arg)
+            sys.exit(1)
 
     if ns.single and ns.fromfile:
         parser.error("-s and -f don't go together!")
-    if ns.use_mp and ns.trace:
+    if ns.use_mp is not None and ns.trace:
         parser.error("-T and -j don't go together!")
-    if ns.use_mp and ns.findleaks:
+    if ns.use_mp is not None and ns.findleaks:
         parser.error("-l and -j don't go together!")
     if ns.failfast and not (ns.verbose or ns.verbose3):
         parser.error("-G/--failfast needs either -v or -W")
@@ -318,8 +323,6 @@ def _parse_args(args, **kwargs):
         if ns.use_mp <= 0:
             # Use all cores + extras for tests that like to sleep
             ns.use_mp = 2 + (os.cpu_count() or 1)
-        if ns.use_mp == 1:
-            ns.use_mp = None
     if ns.use:
         for a in ns.use:
             for r in a:

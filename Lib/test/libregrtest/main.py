@@ -1,4 +1,6 @@
+import datetime
 import faulthandler
+import locale
 import os
 import platform
 import random
@@ -7,11 +9,13 @@ import sys
 import sysconfig
 import tempfile
 import textwrap
+import time
 from test.libregrtest.cmdline import _parse_args
 from test.libregrtest.runtest import (
     findtests, runtest,
     STDTESTS, NOTTESTS, PASSED, FAILED, ENV_CHANGED, SKIPPED, RESOURCE_DENIED,
-    INTERRUPTED, CHILD_ERROR)
+    INTERRUPTED, CHILD_ERROR,
+    PROGRESS_MIN_TIME, format_test_result)
 from test.libregrtest.setup import setup_tests
 from test import support
 try:
@@ -28,6 +32,16 @@ if sysconfig.is_python_build():
 else:
     TEMPDIR = tempfile.gettempdir()
 TEMPDIR = os.path.abspath(TEMPDIR)
+
+
+def format_duration(seconds):
+    if seconds < 1.0:
+        return '%.0f ms' % (seconds * 1e3)
+    if seconds < 60.0:
+        return '%.0f sec' % seconds
+
+    minutes, seconds = divmod(seconds, 60.0)
+    return '%.0f min %.0f sec' % (minutes, seconds)
 
 
 class Regrtest:
@@ -79,6 +93,7 @@ class Regrtest:
         self.found_garbage = []
 
         # used to display the progress bar "[ 3/100]"
+        self.start_time = time.monotonic()
         self.test_count = ''
         self.test_count_width = 1
 
@@ -92,7 +107,7 @@ class Regrtest:
             self.test_times.append((test_time, test))
         if ok == PASSED:
             self.good.append(test)
-        elif ok == FAILED:
+        elif ok in (FAILED, CHILD_ERROR):
             self.bad.append(test)
         elif ok == ENV_CHANGED:
             self.environment_changed.append(test)
@@ -106,12 +121,18 @@ class Regrtest:
         if self.ns.quiet:
             return
         if self.bad and not self.ns.pgo:
-            fmt = "[{1:{0}}{2}/{3}] {4}"
+            fmt = "{time} [{test_index:{count_width}}{test_count}/{nbad}] {test_name}"
         else:
-            fmt = "[{1:{0}}{2}] {4}"
-        print(fmt.format(self.test_count_width, test_index,
-                         self.test_count, len(self.bad), test),
-              flush=True)
+            fmt = "{time} [{test_index:{count_width}}{test_count}] {test_name}"
+        test_time = time.monotonic() - self.start_time
+        test_time = datetime.timedelta(seconds=int(test_time))
+        line = fmt.format(count_width=self.test_count_width,
+                          test_index=test_index,
+                          test_count=self.test_count,
+                          nbad=len(self.bad),
+                          test_name=test,
+                          time=test_time)
+        print(line, flush=True)
 
     def parse_args(self, kwargs):
         ns = _parse_args(sys.argv[1:], **kwargs)
@@ -156,13 +177,16 @@ class Regrtest:
 
         if self.ns.fromfile:
             self.tests = []
+            # regex to match 'test_builtin' in line:
+            # '0:00:00 [  4/400] test_builtin -- test_dict took 1 sec'
+            regex = re.compile(r'\btest_[a-zA-Z0-9_]+\b')
             with open(os.path.join(support.SAVEDCWD, self.ns.fromfile)) as fp:
-                count_pat = re.compile(r'\[\s*\d+/\s*\d+\]')
                 for line in fp:
-                    line = count_pat.sub('', line)
-                    guts = line.split() # assuming no test has whitespace in its name
-                    if guts and not guts[0].startswith('#'):
-                        self.tests.extend(guts)
+                    line = line.split('#', 1)[0]
+                    line = line.strip()
+                    match = regex.search(line)
+                    if match is not None:
+                        self.tests.append(match.group())
 
         removepy(self.tests)
 
@@ -182,7 +206,10 @@ class Regrtest:
         else:
             alltests = findtests(self.ns.testdir, stdtests, nottests)
 
-        self.selected = self.tests or self.ns.args or alltests
+        if not self.ns.fromfile:
+            self.selected = self.tests or self.ns.args or alltests
+        else:
+            self.selected = self.tests
         if self.ns.single:
             self.selected = self.selected[:1]
             try:
@@ -222,6 +249,7 @@ class Regrtest:
                 self.ns.verbose = True
                 ok = runtest(self.ns, test)
             except KeyboardInterrupt:
+                self.interrupted = True
                 # print a newline separate from the ^C
                 print()
                 break
@@ -258,20 +286,24 @@ class Regrtest:
 
         if self.ns.print_slow:
             self.test_times.sort(reverse=True)
+            print()
             print("10 slowest tests:")
             for time, test in self.test_times[:10]:
-                print("%s: %.1fs" % (test, time))
+                print("- %s: %s" % (test, format_duration(time)))
 
         if self.bad:
+            print()
             print(count(len(self.bad), "test"), "failed:")
             printlist(self.bad)
 
         if self.environment_changed:
+            print()
             print("{} altered the execution environment:".format(
                      count(len(self.environment_changed), "test")))
             printlist(self.environment_changed)
 
         if self.skipped and not self.ns.quiet:
+            print()
             print(count(len(self.skipped), "test"), "skipped:")
             printlist(self.skipped)
 
@@ -282,23 +314,42 @@ class Regrtest:
 
         save_modules = sys.modules.keys()
 
+        print("Run tests sequentially")
+
+        previous_test = None
         for test_index, test in enumerate(self.tests, 1):
-            self.display_progress(test_index, test)
+            start_time = time.monotonic()
+
+            text = test
+            if previous_test:
+                text = '%s -- %s' % (text, previous_test)
+            self.display_progress(test_index, text)
+
             if self.tracer:
                 # If we're tracing code coverage, then we don't exit with status
                 # if on a false return value from main.
                 cmd = ('result = runtest(self.ns, test); '
                        'self.accumulate_result(test, result)')
-                self.tracer.runctx(cmd, globals=globals(), locals=vars())
+                ns = dict(locals())
+                self.tracer.runctx(cmd, globals=globals(), locals=ns)
+                result = ns['result']
             else:
                 try:
                     result = runtest(self.ns, test)
                 except KeyboardInterrupt:
-                    self.accumulate_result(test, (INTERRUPTED, None))
                     self.interrupted = True
+                    self.accumulate_result(test, (INTERRUPTED, None))
                     break
                 else:
                     self.accumulate_result(test, result)
+
+            previous_test = format_test_result(test, result[0])
+            test_time = time.monotonic() - start_time
+            if test_time >= PROGRESS_MIN_TIME:
+                previous_test = "%s in %s" % (previous_test, format_duration(test_time))
+            elif result[0] == PASSED:
+                # be quiet: say nothing if the test passed shortly
+                previous_test = None
 
             if self.ns.findleaks:
                 gc.collect()
@@ -314,6 +365,9 @@ class Regrtest:
             for module in sys.modules.keys():
                 if module not in save_modules and module.startswith("test."):
                     support.unload(module)
+
+        if previous_test:
+            print(previous_test)
 
     def _test_forever(self, tests):
         while True:
@@ -334,7 +388,10 @@ class Regrtest:
                           "%s-endian" % sys.byteorder)
             print("==  ", "hash algorithm:", sys.hash_info.algorithm,
                   "64bit" if sys.maxsize > 2**32 else "32bit")
-            print("==  ", os.getcwd())
+            print("==  cwd:", os.getcwd())
+            print("==  encodings: locale=%s, FS=%s"
+                  % (locale.getpreferredencoding(False),
+                     sys.getfilesystemencoding()))
             print("Testing with flags:", sys.flags)
 
         if self.ns.randomize:
@@ -368,10 +425,44 @@ class Regrtest:
             r.write_results(show_missing=True, summary=True,
                             coverdir=self.ns.coverdir)
 
+        print()
+        duration = time.monotonic() - self.start_time
+        print("Total duration: %s" % format_duration(duration))
+
+        if self.bad:
+            result = "FAILURE"
+        elif self.interrupted:
+            result = "INTERRUPTED"
+        else:
+            result = "SUCCESS"
+        print("Tests result: %s" % result)
+
         if self.ns.runleaks:
             os.system("leaks %d" % os.getpid())
 
     def main(self, tests=None, **kwargs):
+        global TEMPDIR
+
+        if sysconfig.is_python_build():
+            try:
+                os.mkdir(TEMPDIR)
+            except FileExistsError:
+                pass
+
+        # Define a writable temp dir that will be used as cwd while running
+        # the tests. The name of the dir includes the pid to allow parallel
+        # testing (see the -j option).
+        test_cwd = 'test_python_{}'.format(os.getpid())
+        test_cwd = os.path.join(TEMPDIR, test_cwd)
+
+        # Run the tests in a context manager that temporarily changes the CWD to a
+        # temporary and writable directory.  If it's not possible to create or
+        # change the CWD, the original CWD will be used.  The original CWD is
+        # available from support.SAVEDCWD.
+        with support.temp_cwd(test_cwd, quiet=True):
+            self._main(tests, kwargs)
+
+    def _main(self, tests, kwargs):
         self.ns = self.parse_args(kwargs)
 
         if self.ns.slaveargs is not None:
@@ -380,6 +471,8 @@ class Regrtest:
 
         if self.ns.wait:
             input("Press any key to continue...")
+
+        support.PGO = self.ns.pgo
 
         setup_tests(self.ns)
 
@@ -430,26 +523,5 @@ def printlist(x, width=70, indent=4):
 
 
 def main(tests=None, **kwargs):
+    """Run the Python suite."""
     Regrtest().main(tests=tests, **kwargs)
-
-
-def main_in_temp_cwd():
-    """Run main() in a temporary working directory."""
-    if sysconfig.is_python_build():
-        try:
-            os.mkdir(TEMPDIR)
-        except FileExistsError:
-            pass
-
-    # Define a writable temp dir that will be used as cwd while running
-    # the tests. The name of the dir includes the pid to allow parallel
-    # testing (see the -j option).
-    test_cwd = 'test_python_{}'.format(os.getpid())
-    test_cwd = os.path.join(TEMPDIR, test_cwd)
-
-    # Run the tests in a context manager that temporarily changes the CWD to a
-    # temporary and writable directory.  If it's not possible to create or
-    # change the CWD, the original CWD will be used.  The original CWD is
-    # available from support.SAVEDCWD.
-    with support.temp_cwd(test_cwd, quiet=True):
-        main()

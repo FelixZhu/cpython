@@ -5,11 +5,12 @@
    :synopsis: Tools for converting between binary and various ASCII-encoded binary
               representations.
 
-
 .. index::
    module: uu
    module: base64
    module: binhex
+
+--------------
 
 The :mod:`binascii` module contains a number of methods to convert between
 binary and various ASCII-encoded binary representations. Normally, you will not
@@ -21,7 +22,7 @@ higher-level modules.
 .. note::
 
    ``a2b_*`` functions accept Unicode strings containing only ASCII characters.
-   Other functions only accept :term:`bytes-like object`\ s (such as
+   Other functions only accept :term:`bytes-like objects <bytes-like object>` (such as
    :class:`bytes`, :class:`bytearray` and other objects that support the buffer
    protocol).
 
@@ -115,8 +116,10 @@ The :mod:`binascii` module defines the following functions:
 
 .. function:: crc_hqx(data, value)
 
-   Compute the binhex4 crc value of *data*, starting with *value* as the
-   initial crc, and return the result.
+   Compute a 16-bit CRC value of *data*, starting with *value* as the
+   initial CRC, and return the result.  This uses the CRC-CCITT polynomial
+   *x*:sup:`16` + *x*:sup:`12` + *x*:sup:`5` + 1, often represented as
+   0x1021.  This CRC is used in the binhex4 format.
 
 
 .. function:: crc32(data[, value])
@@ -152,8 +155,8 @@ The :mod:`binascii` module defines the following functions:
 
    Return the binary data represented by the hexadecimal string *hexstr*.  This
    function is the inverse of :func:`b2a_hex`. *hexstr* must contain an even number
-   of hexadecimal digits (which can be upper or lower case), otherwise a
-   :exc:`TypeError` is raised.
+   of hexadecimal digits (which can be upper or lower case), otherwise an
+   :exc:`Error` exception is raised.
 
 
 .. exception:: Error

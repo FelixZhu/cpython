@@ -158,21 +158,26 @@ PyDoc_STRVAR(_io_BytesIO_read__doc__,
 "Return an empty bytes object at EOF.");
 
 #define _IO_BYTESIO_READ_METHODDEF    \
-    {"read", (PyCFunction)_io_BytesIO_read, METH_VARARGS, _io_BytesIO_read__doc__},
+    {"read", (PyCFunction)_io_BytesIO_read, METH_FASTCALL, _io_BytesIO_read__doc__},
 
 static PyObject *
 _io_BytesIO_read_impl(bytesio *self, PyObject *arg);
 
 static PyObject *
-_io_BytesIO_read(bytesio *self, PyObject *args)
+_io_BytesIO_read(bytesio *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     PyObject *arg = Py_None;
 
-    if (!PyArg_UnpackTuple(args, "read",
+    if (!_PyArg_UnpackStack(args, nargs, "read",
         0, 1,
-        &arg))
+        &arg)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("read", kwnames)) {
+        goto exit;
+    }
     return_value = _io_BytesIO_read_impl(self, arg);
 
 exit:
@@ -180,7 +185,7 @@ exit:
 }
 
 PyDoc_STRVAR(_io_BytesIO_read1__doc__,
-"read1($self, size, /)\n"
+"read1($self, size=-1, /)\n"
 "--\n"
 "\n"
 "Read at most size bytes, returned as a bytes object.\n"
@@ -189,7 +194,31 @@ PyDoc_STRVAR(_io_BytesIO_read1__doc__,
 "Return an empty bytes object at EOF.");
 
 #define _IO_BYTESIO_READ1_METHODDEF    \
-    {"read1", (PyCFunction)_io_BytesIO_read1, METH_O, _io_BytesIO_read1__doc__},
+    {"read1", (PyCFunction)_io_BytesIO_read1, METH_FASTCALL, _io_BytesIO_read1__doc__},
+
+static PyObject *
+_io_BytesIO_read1_impl(bytesio *self, PyObject *size);
+
+static PyObject *
+_io_BytesIO_read1(bytesio *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
+{
+    PyObject *return_value = NULL;
+    PyObject *size = Py_None;
+
+    if (!_PyArg_UnpackStack(args, nargs, "read1",
+        0, 1,
+        &size)) {
+        goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("read1", kwnames)) {
+        goto exit;
+    }
+    return_value = _io_BytesIO_read1_impl(self, size);
+
+exit:
+    return return_value;
+}
 
 PyDoc_STRVAR(_io_BytesIO_readline__doc__,
 "readline($self, size=None, /)\n"
@@ -202,21 +231,26 @@ PyDoc_STRVAR(_io_BytesIO_readline__doc__,
 "Return an empty bytes object at EOF.");
 
 #define _IO_BYTESIO_READLINE_METHODDEF    \
-    {"readline", (PyCFunction)_io_BytesIO_readline, METH_VARARGS, _io_BytesIO_readline__doc__},
+    {"readline", (PyCFunction)_io_BytesIO_readline, METH_FASTCALL, _io_BytesIO_readline__doc__},
 
 static PyObject *
 _io_BytesIO_readline_impl(bytesio *self, PyObject *arg);
 
 static PyObject *
-_io_BytesIO_readline(bytesio *self, PyObject *args)
+_io_BytesIO_readline(bytesio *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     PyObject *arg = Py_None;
 
-    if (!PyArg_UnpackTuple(args, "readline",
+    if (!_PyArg_UnpackStack(args, nargs, "readline",
         0, 1,
-        &arg))
+        &arg)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("readline", kwnames)) {
+        goto exit;
+    }
     return_value = _io_BytesIO_readline_impl(self, arg);
 
 exit:
@@ -234,21 +268,26 @@ PyDoc_STRVAR(_io_BytesIO_readlines__doc__,
 "total number of bytes in the lines returned.");
 
 #define _IO_BYTESIO_READLINES_METHODDEF    \
-    {"readlines", (PyCFunction)_io_BytesIO_readlines, METH_VARARGS, _io_BytesIO_readlines__doc__},
+    {"readlines", (PyCFunction)_io_BytesIO_readlines, METH_FASTCALL, _io_BytesIO_readlines__doc__},
 
 static PyObject *
 _io_BytesIO_readlines_impl(bytesio *self, PyObject *arg);
 
 static PyObject *
-_io_BytesIO_readlines(bytesio *self, PyObject *args)
+_io_BytesIO_readlines(bytesio *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     PyObject *arg = Py_None;
 
-    if (!PyArg_UnpackTuple(args, "readlines",
+    if (!_PyArg_UnpackStack(args, nargs, "readlines",
         0, 1,
-        &arg))
+        &arg)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("readlines", kwnames)) {
+        goto exit;
+    }
     return_value = _io_BytesIO_readlines_impl(self, arg);
 
 exit:
@@ -259,10 +298,10 @@ PyDoc_STRVAR(_io_BytesIO_readinto__doc__,
 "readinto($self, buffer, /)\n"
 "--\n"
 "\n"
-"Read up to len(buffer) bytes into buffer.\n"
+"Read bytes into buffer.\n"
 "\n"
 "Returns number of bytes read (0 for EOF), or None if the object\n"
-"is set not to block as has no data to read.");
+"is set not to block and has no data to read.");
 
 #define _IO_BYTESIO_READINTO_METHODDEF    \
     {"readinto", (PyCFunction)_io_BytesIO_readinto, METH_O, _io_BytesIO_readinto__doc__},
@@ -276,14 +315,16 @@ _io_BytesIO_readinto(bytesio *self, PyObject *arg)
     PyObject *return_value = NULL;
     Py_buffer buffer = {NULL, NULL};
 
-    if (!PyArg_Parse(arg, "w*:readinto", &buffer))
+    if (!PyArg_Parse(arg, "w*:readinto", &buffer)) {
         goto exit;
+    }
     return_value = _io_BytesIO_readinto_impl(self, &buffer);
 
 exit:
     /* Cleanup for buffer */
-    if (buffer.obj)
+    if (buffer.obj) {
        PyBuffer_Release(&buffer);
+    }
 
     return return_value;
 }
@@ -298,21 +339,26 @@ PyDoc_STRVAR(_io_BytesIO_truncate__doc__,
 "The current file position is unchanged.  Returns the new size.");
 
 #define _IO_BYTESIO_TRUNCATE_METHODDEF    \
-    {"truncate", (PyCFunction)_io_BytesIO_truncate, METH_VARARGS, _io_BytesIO_truncate__doc__},
+    {"truncate", (PyCFunction)_io_BytesIO_truncate, METH_FASTCALL, _io_BytesIO_truncate__doc__},
 
 static PyObject *
 _io_BytesIO_truncate_impl(bytesio *self, PyObject *arg);
 
 static PyObject *
-_io_BytesIO_truncate(bytesio *self, PyObject *args)
+_io_BytesIO_truncate(bytesio *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     PyObject *arg = Py_None;
 
-    if (!PyArg_UnpackTuple(args, "truncate",
+    if (!_PyArg_UnpackStack(args, nargs, "truncate",
         0, 1,
-        &arg))
+        &arg)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("truncate", kwnames)) {
+        goto exit;
+    }
     return_value = _io_BytesIO_truncate_impl(self, arg);
 
 exit:
@@ -332,21 +378,26 @@ PyDoc_STRVAR(_io_BytesIO_seek__doc__,
 "Returns the new absolute position.");
 
 #define _IO_BYTESIO_SEEK_METHODDEF    \
-    {"seek", (PyCFunction)_io_BytesIO_seek, METH_VARARGS, _io_BytesIO_seek__doc__},
+    {"seek", (PyCFunction)_io_BytesIO_seek, METH_FASTCALL, _io_BytesIO_seek__doc__},
 
 static PyObject *
 _io_BytesIO_seek_impl(bytesio *self, Py_ssize_t pos, int whence);
 
 static PyObject *
-_io_BytesIO_seek(bytesio *self, PyObject *args)
+_io_BytesIO_seek(bytesio *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *return_value = NULL;
     Py_ssize_t pos;
     int whence = 0;
 
-    if (!PyArg_ParseTuple(args, "n|i:seek",
-        &pos, &whence))
+    if (!_PyArg_ParseStack(args, nargs, "n|i:seek",
+        &pos, &whence)) {
         goto exit;
+    }
+
+    if (!_PyArg_NoStackKeywords("seek", kwnames)) {
+        goto exit;
+    }
     return_value = _io_BytesIO_seek_impl(self, pos, whence);
 
 exit:
@@ -408,15 +459,17 @@ static int
 _io_BytesIO___init__(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     int return_value = -1;
-    static char *_keywords[] = {"initial_bytes", NULL};
+    static const char * const _keywords[] = {"initial_bytes", NULL};
+    static _PyArg_Parser _parser = {"|O:BytesIO", _keywords, 0};
     PyObject *initvalue = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O:BytesIO", _keywords,
-        &initvalue))
+    if (!_PyArg_ParseTupleAndKeywordsFast(args, kwargs, &_parser,
+        &initvalue)) {
         goto exit;
+    }
     return_value = _io_BytesIO___init___impl((bytesio *)self, initvalue);
 
 exit:
     return return_value;
 }
-/*[clinic end generated code: output=500ccc149587fac4 input=a9049054013a1b77]*/
+/*[clinic end generated code: output=138ee6ad6951bc84 input=a9049054013a1b77]*/

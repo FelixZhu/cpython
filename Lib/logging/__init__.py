@@ -1,4 +1,4 @@
-# Copyright 2001-2015 by Vinay Sajip. All Rights Reserved.
+# Copyright 2001-2016 by Vinay Sajip. All Rights Reserved.
 #
 # Permission to use, copy, modify, and distribute this software and its
 # documentation for any purpose and without fee is hereby granted,
@@ -18,7 +18,7 @@
 Logging package for Python. Based on PEP 282 and comments thereto in
 comp.lang.python.
 
-Copyright (C) 2001-2015 Vinay Sajip. All Rights Reserved.
+Copyright (C) 2001-2016 Vinay Sajip. All Rights Reserved.
 
 To use, simply 'import logging' and log away!
 """
@@ -108,6 +108,7 @@ _levelToName = {
 }
 _nameToLevel = {
     'CRITICAL': CRITICAL,
+    'FATAL': FATAL,
     'ERROR': ERROR,
     'WARN': WARNING,
     'WARNING': WARNING,
@@ -130,8 +131,14 @@ def getLevelName(level):
 
     Otherwise, the string "Level %s" % level is returned.
     """
-    # See Issue #22386 for the reason for this convoluted expression
-    return _levelToName.get(level, _nameToLevel.get(level, ("Level %s" % level)))
+    # See Issues #22386, #27937 and #29220 for why it's this way
+    result = _levelToName.get(level)
+    if result is not None:
+        return result
+    result = _nameToLevel.get(level)
+    if result is not None:
+        return result
+    return "Level %s" % level
 
 def addLevelName(level, levelName):
     """
@@ -472,7 +479,7 @@ class Formatter(object):
         use one of %-formatting, :meth:`str.format` (``{}``) formatting or
         :class:`string.Template` formatting in your format string.
 
-        .. versionchanged: 3.2
+        .. versionchanged:: 3.2
            Added the ``style`` parameter.
         """
         if style not in _STYLES:
@@ -701,7 +708,7 @@ class Filterer(object):
         this and the record is then dropped. Returns a zero value if a record
         is to be dropped, else non-zero.
 
-        .. versionchanged: 3.2
+        .. versionchanged:: 3.2
 
            Allow filters to be just callables.
         """
@@ -935,6 +942,10 @@ class Handler(Filterer):
             finally:
                 del t, v, tb
 
+    def __repr__(self):
+        level = getLevelName(self.level)
+        return '<%s (%s)>' % (self.__class__.__name__, level)
+
 class StreamHandler(Handler):
     """
     A handler class which writes logging records, appropriately formatted,
@@ -986,6 +997,14 @@ class StreamHandler(Handler):
         except Exception:
             self.handleError(record)
 
+    def __repr__(self):
+        level = getLevelName(self.level)
+        name = getattr(self.stream, 'name', '')
+        if name:
+            name += ' '
+        return '<%s %s(%s)>' % (self.__class__.__name__, name, level)
+
+
 class FileHandler(StreamHandler):
     """
     A handler class which writes formatted logging records to disk files.
@@ -994,6 +1013,8 @@ class FileHandler(StreamHandler):
         """
         Open the specified file and use it as the stream for logging.
         """
+        # Issue #27493: add support for Path objects to be passed in
+        filename = os.fspath(filename)
         #keep the absolute path, otherwise derived classes which use this
         #may come a cropper when the current directory changes
         self.baseFilename = os.path.abspath(filename)
@@ -1047,6 +1068,11 @@ class FileHandler(StreamHandler):
         if self.stream is None:
             self.stream = self._open()
         StreamHandler.emit(self, record)
+
+    def __repr__(self):
+        level = getLevelName(self.level)
+        return '<%s %s (%s)>' % (self.__class__.__name__, self.baseFilename, level)
+
 
 class _StderrHandler(StreamHandler):
     """
@@ -1540,6 +1566,11 @@ class Logger(Filterer):
             suffix = '.'.join((self.name, suffix))
         return self.manager.getLogger(suffix)
 
+    def __repr__(self):
+        level = getLevelName(self.getEffectiveLevel())
+        return '<%s %s (%s)>' % (self.__class__.__name__, self.name, level)
+
+
 class RootLogger(Logger):
     """
     A root logger is not that different to any other logger, except that
@@ -1665,6 +1696,11 @@ class LoggerAdapter(object):
         See if the underlying logger has any handlers.
         """
         return self.logger.hasHandlers()
+
+    def __repr__(self):
+        logger = self.logger
+        level = getLevelName(logger.getEffectiveLevel())
+        return '<%s %s (%s)>' % (self.__class__.__name__, logger.name, level)
 
 root = RootLogger(WARNING)
 Logger.root = root
@@ -1858,7 +1894,7 @@ def log(level, msg, *args, **kwargs):
         basicConfig()
     root.log(level, msg, *args, **kwargs)
 
-def disable(level):
+def disable(level=CRITICAL):
     """
     Disable all logging calls of severity 'level' and below.
     """

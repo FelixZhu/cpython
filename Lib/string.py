@@ -14,6 +14,10 @@ printable -- a string containing all ASCII characters considered printable
 
 """
 
+__all__ = ["ascii_letters", "ascii_lowercase", "ascii_uppercase", "capwords",
+           "digits", "hexdigits", "octdigits", "printable", "punctuation",
+           "whitespace", "Formatter", "Template"]
+
 import _string
 
 # Some strings for ctype-style character classification
@@ -24,7 +28,7 @@ ascii_letters = ascii_lowercase + ascii_uppercase
 digits = '0123456789'
 hexdigits = digits + 'abcdef' + 'ABCDEF'
 octdigits = '01234567'
-punctuation = """!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
+punctuation = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
 printable = digits + ascii_letters + punctuation + whitespace
 
 # Functions which aren't available as string methods.
@@ -46,7 +50,7 @@ def capwords(s, sep=None):
 
 ####################################################################
 import re as _re
-from collections import ChainMap
+from collections import ChainMap as _ChainMap
 
 class _TemplateMetaclass(type):
     pattern = r"""
@@ -104,7 +108,7 @@ class Template(metaclass=_TemplateMetaclass):
         if not args:
             mapping = kws
         elif kws:
-            mapping = ChainMap(kws, args[0])
+            mapping = _ChainMap(kws, args[0])
         else:
             mapping = args[0]
         # Helper function for .sub()
@@ -131,7 +135,7 @@ class Template(metaclass=_TemplateMetaclass):
         if not args:
             mapping = kws
         elif kws:
-            mapping = ChainMap(kws, args[0])
+            mapping = _ChainMap(kws, args[0])
         else:
             mapping = args[0]
         # Helper function for .sub()
@@ -171,14 +175,8 @@ class Formatter:
         try:
             format_string, *args = args # allow the "format_string" keyword be passed
         except ValueError:
-            if 'format_string' in kwargs:
-                format_string = kwargs.pop('format_string')
-                import warnings
-                warnings.warn("Passing 'format_string' as keyword argument is "
-                              "deprecated", DeprecationWarning, stacklevel=2)
-            else:
-                raise TypeError("format() missing 1 required positional "
-                                "argument: 'format_string'") from None
+            raise TypeError("format() missing 1 required positional "
+                            "argument: 'format_string'") from None
         return self.vformat(format_string, args, kwargs)
 
     def vformat(self, format_string, args, kwargs):

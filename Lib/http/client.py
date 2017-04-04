@@ -1,4 +1,4 @@
-"""HTTP/1.1 client library
+r"""HTTP/1.1 client library
 
 <intro stuff goes here>
 <other stuff, too>
@@ -72,7 +72,6 @@ import email.parser
 import email.message
 import http
 import io
-import os
 import re
 import socket
 import collections
@@ -136,7 +135,7 @@ _MAXHEADERS = 100
 #
 # VCHAR defined in http://tools.ietf.org/html/rfc5234#appendix-B.1
 
-# the patterns for both name and value are more leniant than RFC
+# the patterns for both name and value are more lenient than RFC
 # definitions to allow for backwards compatibility
 _is_legal_header_name = re.compile(rb'[^:\s][^:\r\n]*').fullmatch
 _is_illegal_header_value = re.compile(rb'\n(?![ \t])|\r(?![ \t\n])').search
@@ -144,6 +143,21 @@ _is_illegal_header_value = re.compile(rb'\n(?![ \t])|\r(?![ \t\n])').search
 # We always set the Content-Length header for these methods because some
 # servers will otherwise respond with a 411
 _METHODS_EXPECTING_BODY = {'PATCH', 'POST', 'PUT'}
+
+
+def _encode(data, name='data'):
+    """Call data.encode("latin-1") but show a better error message."""
+    try:
+        return data.encode("latin-1")
+    except UnicodeEncodeError as err:
+        raise UnicodeEncodeError(
+            err.encoding,
+            err.object,
+            err.start,
+            err.end,
+            "%s (%.20r) is not valid Latin-1. Use %s.encode('utf-8') "
+            "if you want to send it encoded in UTF-8." %
+            (name.title(), data[err.start:err.end], name)) from None
 
 
 class HTTPMessage(email.message.Message):
@@ -625,16 +639,13 @@ class HTTPResponse(io.BufferedIOBase):
             return b""
         if self.chunked:
             return self._read1_chunked(n)
-        try:
-            result = self.fp.read1(n)
-        except ValueError:
-            if n >= 0:
-                raise
-            # some implementations, like BufferedReader, don't support -1
-            # Read an arbitrarily selected largeish chunk.
-            result = self.fp.read1(16*1024)
+        if self.length is not None and (n < 0 or n > self.length):
+            n = self.length
+        result = self.fp.read1(n)
         if not result and n:
             self._close_conn()
+        elif self.length is not None:
+            self.length -= len(result)
         return result
 
     def peek(self, n=-1):
@@ -652,9 +663,13 @@ class HTTPResponse(io.BufferedIOBase):
         if self.chunked:
             # Fallback to IOBase readline which uses peek() and read()
             return super().readline(limit)
+        if self.length is not None and (limit < 0 or limit > self.length):
+            limit = self.length
         result = self.fp.readline(limit)
         if not result and limit:
             self._close_conn()
+        elif self.length is not None:
+            self.length -= len(result)
         return result
 
     def _read1_chunked(self, n):
@@ -771,6 +786,44 @@ class HTTPConnection:
     default_port = HTTP_PORT
     auto_open = 1
     debuglevel = 0
+
+    @staticmethod
+    def _is_textIO(stream):
+        """Test whether a file-like object is a text or a binary stream.
+        """
+        return isinstance(stream, io.TextIOBase)
+
+    @staticmethod
+    def _get_content_length(body, method):
+        """Get the content-length based on the body.
+
+        If the body is None, we set Content-Length: 0 for methods that expect
+        a body (RFC 7230, Section 3.3.2). We also set the Content-Length for
+        any method if the body is a str or bytes-like object and not a file.
+        """
+        if body is None:
+            # do an explicit check for not None here to distinguish
+            # between unset and set but empty
+            if method.upper() in _METHODS_EXPECTING_BODY:
+                return 0
+            else:
+                return None
+
+        if hasattr(body, 'read'):
+            # file-like object.
+            return None
+
+        try:
+            # does it implement the buffer protocol (bytes, bytearray, array)?
+            mv = memoryview(body)
+            return mv.nbytes
+        except TypeError:
+            pass
+
+        if isinstance(body, str):
+            return len(body)
+
+        return None
 
     def __init__(self, host, port=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
                  source_address=None):
@@ -910,18 +963,9 @@ class HTTPConnection:
         if hasattr(data, "read") :
             if self.debuglevel > 0:
                 print("sendIng a read()able")
-            encode = False
-            try:
-                mode = data.mode
-            except AttributeError:
-                # io.BytesIO and other file-like objects don't have a `mode`
-                # attribute.
-                pass
-            else:
-                if "b" not in mode:
-                    encode = True
-                    if self.debuglevel > 0:
-                        print("encoding file using iso-8859-1")
+            encode = self._is_textIO(data)
+            if encode and self.debuglevel > 0:
+                print("encoding file using iso-8859-1")
             while 1:
                 datablock = data.read(blocksize)
                 if not datablock:
@@ -947,7 +991,22 @@ class HTTPConnection:
         """
         self._buffer.append(s)
 
-    def _send_output(self, message_body=None):
+    def _read_readable(self, readable):
+        blocksize = 8192
+        if self.debuglevel > 0:
+            print("sendIng a read()able")
+        encode = self._is_textIO(readable)
+        if encode and self.debuglevel > 0:
+            print("encoding file using iso-8859-1")
+        while True:
+            datablock = readable.read(blocksize)
+            if not datablock:
+                break
+            if encode:
+                datablock = datablock.encode("iso-8859-1")
+            yield datablock
+
+    def _send_output(self, message_body=None, encode_chunked=False):
         """Send the currently buffered request and clear the buffer.
 
         Appends an extra \\r\\n to the buffer.
@@ -956,12 +1015,53 @@ class HTTPConnection:
         self._buffer.extend((b"", b""))
         msg = b"\r\n".join(self._buffer)
         del self._buffer[:]
-
         self.send(msg)
-        if message_body is not None:
-            self.send(message_body)
 
-    def putrequest(self, method, url, skip_host=0, skip_accept_encoding=0):
+        if message_body is not None:
+
+            # create a consistent interface to message_body
+            if hasattr(message_body, 'read'):
+                # Let file-like take precedence over byte-like.  This
+                # is needed to allow the current position of mmap'ed
+                # files to be taken into account.
+                chunks = self._read_readable(message_body)
+            else:
+                try:
+                    # this is solely to check to see if message_body
+                    # implements the buffer API.  it /would/ be easier
+                    # to capture if PyObject_CheckBuffer was exposed
+                    # to Python.
+                    memoryview(message_body)
+                except TypeError:
+                    try:
+                        chunks = iter(message_body)
+                    except TypeError:
+                        raise TypeError("message_body should be a bytes-like "
+                                        "object or an iterable, got %r"
+                                        % type(message_body))
+                else:
+                    # the object implements the buffer interface and
+                    # can be passed directly into socket methods
+                    chunks = (message_body,)
+
+            for chunk in chunks:
+                if not chunk:
+                    if self.debuglevel > 0:
+                        print('Zero length chunk ignored')
+                    continue
+
+                if encode_chunked and self._http_vsn == 11:
+                    # chunked encoding
+                    chunk = f'{len(chunk):X}\r\n'.encode('ascii') + chunk \
+                        + b'\r\n'
+                self.send(chunk)
+
+            if encode_chunked and self._http_vsn == 11:
+                # end chunked transfer
+                self.send(b'0\r\n\r\n')
+
+    def putrequest(self, method, url, skip_host=False,
+                   skip_accept_encoding=False):
         """Send a request to the server.
 
         `method' specifies an HTTP request method, e.g. 'GET'.
@@ -1112,52 +1212,27 @@ class HTTPConnection:
         header = header + b': ' + value
         self._output(header)
 
-    def endheaders(self, message_body=None):
+    def endheaders(self, message_body=None, *, encode_chunked=False):
         """Indicate that the last header line has been sent to the server.
 
         This method sends the request to the server.  The optional message_body
         argument can be used to pass a message body associated with the
-        request.  The message body will be sent in the same packet as the
-        message headers if it is a string, otherwise it is sent as a separate
-        packet.
+        request.
         """
         if self.__state == _CS_REQ_STARTED:
             self.__state = _CS_REQ_SENT
         else:
             raise CannotSendHeader()
-        self._send_output(message_body)
+        self._send_output(message_body, encode_chunked=encode_chunked)
 
-    def request(self, method, url, body=None, headers={}):
+    def request(self, method, url, body=None, headers={}, *,
+                encode_chunked=False):
         """Send a complete request to the server."""
-        self._send_request(method, url, body, headers)
+        self._send_request(method, url, body, headers, encode_chunked)
 
-    def _set_content_length(self, body, method):
-        # Set the content-length based on the body. If the body is "empty", we
-        # set Content-Length: 0 for methods that expect a body (RFC 7230,
-        # Section 3.3.2). If the body is set for other methods, we set the
-        # header provided we can figure out what the length is.
-        thelen = None
-        method_expects_body = method.upper() in _METHODS_EXPECTING_BODY
-        if body is None and method_expects_body:
-            thelen = '0'
-        elif body is not None:
-            try:
-                thelen = str(len(body))
-            except TypeError:
-                # If this is a file-like object, try to
-                # fstat its file descriptor
-                try:
-                    thelen = str(os.fstat(body.fileno()).st_size)
-                except (AttributeError, OSError):
-                    # Don't send a length if this failed
-                    if self.debuglevel > 0: print("Cannot stat!!")
-
-        if thelen is not None:
-            self.putheader('Content-Length', thelen)
-
-    def _send_request(self, method, url, body, headers):
+    def _send_request(self, method, url, body, headers, encode_chunked):
         # Honor explicitly requested Host: and Accept-Encoding: headers.
-        header_names = dict.fromkeys([k.lower() for k in headers])
+        header_names = frozenset(k.lower() for k in headers)
         skips = {}
         if 'host' in header_names:
             skips['skip_host'] = 1
@@ -1166,22 +1241,47 @@ class HTTPConnection:
 
         self.putrequest(method, url, **skips)
 
+        # chunked encoding will happen if HTTP/1.1 is used and either
+        # the caller passes encode_chunked=True or the following
+        # conditions hold:
+        # 1. content-length has not been explicitly set
+        # 2. the body is a file or iterable, but not a str or bytes-like
+        # 3. Transfer-Encoding has NOT been explicitly set by the caller
+
         if 'content-length' not in header_names:
-            self._set_content_length(body, method)
+            # only chunk body if not explicitly set for backwards
+            # compatibility, assuming the client code is already handling the
+            # chunking
+            if 'transfer-encoding' not in header_names:
+                # if content-length cannot be automatically determined, fall
+                # back to chunked encoding
+                encode_chunked = False
+                content_length = self._get_content_length(body, method)
+                if content_length is None:
+                    if body is not None:
+                        if self.debuglevel > 0:
+                            print('Unable to determine size of %r' % body)
+                        encode_chunked = True
+                        self.putheader('Transfer-Encoding', 'chunked')
+                else:
+                    self.putheader('Content-Length', str(content_length))
+        else:
+            encode_chunked = False
+
         for hdr, value in headers.items():
             self.putheader(hdr, value)
         if isinstance(body, str):
             # RFC 2616 Section 3.7.1 says that text default has a
             # default charset of iso-8859-1.
-            body = body.encode('iso-8859-1')
-        self.endheaders(body)
+            body = _encode(body, 'body')
+        self.endheaders(body, encode_chunked=encode_chunked)
 
     def getresponse(self):
         """Get the response from the server.
 
         If the HTTPConnection is in the correct state, returns an
         instance of HTTPResponse or of whatever object is returned by
-        class the response_class variable.
+        the response_class variable.
 
         If a request has not been sent or if a previous response has
         not be handled, ResponseNotReady is raised.  If the HTTP
@@ -1257,6 +1357,12 @@ else:
                      check_hostname=None):
             super(HTTPSConnection, self).__init__(host, port, timeout,
                                                   source_address)
+            if (key_file is not None or cert_file is not None or
+                        check_hostname is not None):
+                import warnings
+                warnings.warn("key_file, cert_file and check_hostname are "
+                              "deprecated, use a custom context instead.",
+                              DeprecationWarning, 2)
             self.key_file = key_file
             self.cert_file = cert_file
             if context is None:

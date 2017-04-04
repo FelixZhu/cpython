@@ -7,6 +7,9 @@
 
 #if defined(MS_WINDOWS) || defined(__CYGWIN__)
 #include <windows.h>
+#ifdef HAVE_IO_H
+#include <io.h>
+#endif
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
@@ -42,11 +45,11 @@ static int  orig_argc;
 #define PROGRAM_OPTS BASE_OPTS
 
 /* Short usage message (with %s for argv0) */
-static char *usage_line =
+static const char usage_line[] =
 "usage: %ls [option] ... [-c cmd | -m mod | file | -] [arg] ...\n";
 
 /* Long usage message, split into parts < 512 bytes */
-static char *usage_1 = "\
+static const char usage_1[] = "\
 Options and arguments (and corresponding environment variables):\n\
 -b     : issue warnings about str(bytes_instance), str(bytearray_instance)\n\
          and comparing bytes/bytearray with str. (-bb: issue errors)\n\
@@ -56,7 +59,7 @@ Options and arguments (and corresponding environment variables):\n\
 -E     : ignore PYTHON* environment variables (such as PYTHONPATH)\n\
 -h     : print this help message and exit (also --help)\n\
 ";
-static char *usage_2 = "\
+static const char usage_2[] = "\
 -i     : inspect interactively after running script; forces a prompt even\n\
          if stdin does not appear to be a terminal; also PYTHONINSPECT=x\n\
 -I     : isolate Python from the user's environment (implies -E and -s)\n\
@@ -67,43 +70,45 @@ static char *usage_2 = "\
 -s     : don't add user site directory to sys.path; also PYTHONNOUSERSITE\n\
 -S     : don't imply 'import site' on initialization\n\
 ";
-static char *usage_3 = "\
+static const char usage_3[] = "\
 -u     : unbuffered binary stdout and stderr, stdin always buffered;\n\
          also PYTHONUNBUFFERED=x\n\
          see man page for details on internal buffering relating to '-u'\n\
 -v     : verbose (trace import statements); also PYTHONVERBOSE=x\n\
          can be supplied multiple times to increase verbosity\n\
 -V     : print the Python version number and exit (also --version)\n\
+         when given twice, print more information about the build\n\
 -W arg : warning control; arg is action:message:category:module:lineno\n\
          also PYTHONWARNINGS=arg\n\
 -x     : skip first line of source, allowing use of non-Unix forms of #!cmd\n\
 -X opt : set implementation-specific option\n\
 ";
-static char *usage_4 = "\
+static const char usage_4[] = "\
 file   : program read from script file\n\
 -      : program read from stdin (default; interactive mode if a tty)\n\
 arg ...: arguments passed to program in sys.argv[1:]\n\n\
 Other environment variables:\n\
 PYTHONSTARTUP: file executed on interactive startup (no default)\n\
-PYTHONPATH   : '%c'-separated list of directories prefixed to the\n\
+PYTHONPATH   : '%lc'-separated list of directories prefixed to the\n\
                default module search path.  The result is sys.path.\n\
 ";
-static char *usage_5 =
-"PYTHONHOME   : alternate <prefix> directory (or <prefix>%c<exec_prefix>).\n"
+static const char usage_5[] =
+"PYTHONHOME   : alternate <prefix> directory (or <prefix>%lc<exec_prefix>).\n"
 "               The default module search path uses %s.\n"
 "PYTHONCASEOK : ignore case in 'import' statements (Windows).\n"
 "PYTHONIOENCODING: Encoding[:errors] used for stdin/stdout/stderr.\n"
-"PYTHONFAULTHANDLER: dump the Python traceback on fatal errors.\n\
-";
-static char *usage_6 = "\
-PYTHONHASHSEED: if this variable is set to 'random', a random value is used\n\
-   to seed the hashes of str, bytes and datetime objects.  It can also be\n\
-   set to an integer in the range [0,4294967295] to get hash values with a\n\
-   predictable seed.\n\
-";
+"PYTHONFAULTHANDLER: dump the Python traceback on fatal errors.\n";
+static const char usage_6[] =
+"PYTHONHASHSEED: if this variable is set to 'random', a random value is used\n"
+"   to seed the hashes of str, bytes and datetime objects.  It can also be\n"
+"   set to an integer in the range [0,4294967295] to get hash values with a\n"
+"   predictable seed.\n"
+"PYTHONMALLOC: set the Python memory allocators and/or install debug hooks\n"
+"   on Python memory allocators. Use PYTHONMALLOC=debug to install debug\n"
+"   hooks.\n";
 
 static int
-usage(int exitcode, wchar_t* program)
+usage(int exitcode, const wchar_t* program)
 {
     FILE *f = exitcode ? stderr : stdout;
 
@@ -114,8 +119,8 @@ usage(int exitcode, wchar_t* program)
         fputs(usage_1, f);
         fputs(usage_2, f);
         fputs(usage_3, f);
-        fprintf(f, usage_4, DELIM);
-        fprintf(f, usage_5, DELIM, PYTHONHOMEHELP);
+        fprintf(f, usage_4, (wint_t)DELIM);
+        fprintf(f, usage_5, (wint_t)DELIM, PYTHONHOMEHELP);
         fputs(usage_6, f);
     }
     return exitcode;
@@ -155,7 +160,7 @@ static void RunInteractiveHook(void)
     if (hook == NULL)
         PyErr_Clear();
     else {
-        result = PyObject_CallObject(hook, NULL);
+        result = _PyObject_CallNoArg(hook);
         Py_DECREF(hook);
         if (result == NULL)
             goto error;
@@ -223,7 +228,7 @@ static int RunModule(wchar_t *modname, int set_argv0)
 static int
 RunMainFromImporter(wchar_t *filename)
 {
-    PyObject *argv0 = NULL, *importer, *sys_path;
+    PyObject *argv0 = NULL, *importer, *sys_path, *sys_path0;
     int sts;
 
     argv0 = PyUnicode_FromWideChar(filename, wcslen(filename));
@@ -248,7 +253,17 @@ RunMainFromImporter(wchar_t *filename)
         PyErr_SetString(PyExc_RuntimeError, "unable to get sys.path");
         goto error;
     }
-    if (PyList_SetItem(sys_path, 0, argv0)) {
+    sys_path0 = PyList_GetItem(sys_path, 0);
+    sts = 0;
+    if (!sys_path0) {
+        PyErr_Clear();
+        sts = PyList_Append(sys_path, argv0);
+    } else if (PyObject_IsTrue(sys_path0)) {
+        sts = PyList_Insert(sys_path, 0, argv0);
+    } else {
+        sts = PyList_SetItem(sys_path, 0, argv0);
+    }
+    if (sts) {
         argv0 = NULL;
         goto error;
     }
@@ -341,6 +356,7 @@ Py_Main(int argc, wchar_t **argv)
     int help = 0;
     int version = 0;
     int saw_unbuffered_flag = 0;
+    char *opt;
     PyCompilerFlags cf;
     PyObject *warning_option = NULL;
     PyObject *warning_options = NULL;
@@ -363,6 +379,13 @@ Py_Main(int argc, wchar_t **argv)
             Py_IgnoreEnvironmentFlag++;
             break;
         }
+    }
+
+    opt = Py_GETENV("PYTHONMALLOC");
+    if (_PyMem_SetupAllocators(opt) < 0) {
+        fprintf(stderr,
+                "Error in PYTHONMALLOC: unknown allocator \"%s\"!\n", opt);
+        exit(1);
     }
 
     Py_HashRandomizationFlag = 1;
@@ -473,7 +496,8 @@ Py_Main(int argc, wchar_t **argv)
             warning_option = PyUnicode_FromWideChar(_PyOS_optarg, -1);
             if (warning_option == NULL)
                 Py_FatalError("failure in handling of -W argument");
-            PyList_Append(warning_options, warning_option);
+            if (PyList_Append(warning_options, warning_option) == -1)
+                Py_FatalError("failure in handling of -W argument");
             Py_DECREF(warning_option);
             break;
 
@@ -502,7 +526,7 @@ Py_Main(int argc, wchar_t **argv)
         return usage(0, argv[0]);
 
     if (version) {
-        printf("Python %s\n", PY_VERSION);
+        printf("Python %s\n", version >= 2 ? Py_GetVersion() : PY_VERSION);
         return 0;
     }
 
@@ -693,7 +717,8 @@ Py_Main(int argc, wchar_t **argv)
     PySys_SetArgv(argc-_PyOS_optind, argv+_PyOS_optind);
 
     if ((Py_InspectFlag || (command == NULL && filename == NULL && module == NULL)) &&
-        isatty(fileno(stdin))) {
+        isatty(fileno(stdin)) &&
+        !Py_IsolatedFlag) {
         PyObject *v;
         v = PyImport_ImportModule("readline");
         if (v == NULL)

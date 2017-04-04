@@ -10,7 +10,6 @@ import os
 from os.path import normcase
 import _pickle
 import pickle
-import re
 import shutil
 import sys
 import types
@@ -30,6 +29,7 @@ from test.support import MISSING_C_DOCSTRINGS, cpython_only
 from test.support.script_helper import assert_python_ok, assert_python_failure
 from test import inspect_fodder as mod
 from test import inspect_fodder2 as mod2
+from test import support
 
 from test.test_import import _ready_to_import
 
@@ -55,8 +55,6 @@ modfile = normcase(modfile)
 def revise(filename, *args):
     return (normcase(filename),) + args
 
-import builtins
-
 git = mod.StupidGit()
 
 class IsTestBase(unittest.TestCase):
@@ -64,7 +62,8 @@ class IsTestBase(unittest.TestCase):
                       inspect.isframe, inspect.isfunction, inspect.ismethod,
                       inspect.ismodule, inspect.istraceback,
                       inspect.isgenerator, inspect.isgeneratorfunction,
-                      inspect.iscoroutine, inspect.iscoroutinefunction])
+                      inspect.iscoroutine, inspect.iscoroutinefunction,
+                      inspect.isasyncgen, inspect.isasyncgenfunction])
 
     def istest(self, predicate, exp):
         obj = eval(exp)
@@ -72,6 +71,7 @@ class IsTestBase(unittest.TestCase):
 
         for other in self.predicates - set([predicate]):
             if (predicate == inspect.isgeneratorfunction or \
+               predicate == inspect.isasyncgenfunction or \
                predicate == inspect.iscoroutinefunction) and \
                other == inspect.isfunction:
                 continue
@@ -79,6 +79,10 @@ class IsTestBase(unittest.TestCase):
 
 def generator_function_example(self):
     for i in range(2):
+        yield i
+
+async def async_generator_function_example(self):
+    async for i in range(2):
         yield i
 
 async def coroutine_function_example(self):
@@ -121,6 +125,10 @@ class TestPredicates(IsTestBase):
         self.istest(inspect.isdatadescriptor, 'collections.defaultdict.default_factory')
         self.istest(inspect.isgenerator, '(x for x in range(2))')
         self.istest(inspect.isgeneratorfunction, 'generator_function_example')
+        self.istest(inspect.isasyncgen,
+                    'async_generator_function_example(1)')
+        self.istest(inspect.isasyncgenfunction,
+                    'async_generator_function_example')
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -391,6 +399,11 @@ class TestRetrievingSourceCode(GetSourceBase):
         # Check filename override
         self.assertEqual(inspect.getmodule(None, modfile), mod)
 
+    def test_getframeinfo_get_first_line(self):
+        frame_info = inspect.getframeinfo(self.fodderModule.fr, 50)
+        self.assertEqual(frame_info.code_context[0], "# line 1\n")
+        self.assertEqual(frame_info.code_context[1], "'A module docstring.'\n")
+
     def test_getsource(self):
         self.assertSourceEqual(git.abuse, 29, 39)
         self.assertSourceEqual(mod.StupidGit, 21, 51)
@@ -400,7 +413,7 @@ class TestRetrievingSourceCode(GetSourceBase):
         self.assertEqual(normcase(inspect.getsourcefile(mod.spam)), modfile)
         self.assertEqual(normcase(inspect.getsourcefile(git.abuse)), modfile)
         fn = "_non_existing_filename_used_for_sourcefile_test.py"
-        co = compile("None", fn, "exec")
+        co = compile("x=1", fn, "exec")
         self.assertEqual(inspect.getsourcefile(co), None)
         linecache.cache[co.co_filename] = (1, None, "None", co.co_filename)
         try:
@@ -628,6 +641,18 @@ class TestClassesAndFunctions(unittest.TestCase):
         got = inspect.getmro(D)
         self.assertEqual(expected, got)
 
+    def assertArgSpecEquals(self, routine, args_e, varargs_e=None,
+                            varkw_e=None, defaults_e=None, formatted=None):
+        with self.assertWarns(DeprecationWarning):
+            args, varargs, varkw, defaults = inspect.getargspec(routine)
+        self.assertEqual(args, args_e)
+        self.assertEqual(varargs, varargs_e)
+        self.assertEqual(varkw, varkw_e)
+        self.assertEqual(defaults, defaults_e)
+        if formatted is not None:
+            self.assertEqual(inspect.formatargspec(args, varargs, varkw, defaults),
+                             formatted)
+
     def assertFullArgSpecEquals(self, routine, args_e, varargs_e=None,
                                     varkw_e=None, defaults_e=None,
                                     kwonlyargs_e=[], kwonlydefaults_e=None,
@@ -646,6 +671,23 @@ class TestClassesAndFunctions(unittest.TestCase):
                                                     kwonlyargs, kwonlydefaults, ann),
                              formatted)
 
+    def test_getargspec(self):
+        self.assertArgSpecEquals(mod.eggs, ['x', 'y'], formatted='(x, y)')
+
+        self.assertArgSpecEquals(mod.spam,
+                                 ['a', 'b', 'c', 'd', 'e', 'f'],
+                                 'g', 'h', (3, 4, 5),
+                                 '(a, b, c, d=3, e=4, f=5, *g, **h)')
+
+        self.assertRaises(ValueError, self.assertArgSpecEquals,
+                          mod2.keyworded, [])
+
+        self.assertRaises(ValueError, self.assertArgSpecEquals,
+                          mod2.annotated, [])
+        self.assertRaises(ValueError, self.assertArgSpecEquals,
+                          mod2.keyword_only_arg, [])
+
+
     def test_getfullargspec(self):
         self.assertFullArgSpecEquals(mod2.keyworded, [], varargs_e='arg1',
                                      kwonlyargs_e=['arg2'],
@@ -659,19 +701,20 @@ class TestClassesAndFunctions(unittest.TestCase):
                                      kwonlyargs_e=['arg'],
                                      formatted='(*, arg)')
 
-    def test_fullargspec_api_ignores_wrapped(self):
+    def test_argspec_api_ignores_wrapped(self):
         # Issue 20684: low level introspection API must ignore __wrapped__
         @functools.wraps(mod.spam)
         def ham(x, y):
             pass
         # Basic check
+        self.assertArgSpecEquals(ham, ['x', 'y'], formatted='(x, y)')
         self.assertFullArgSpecEquals(ham, ['x', 'y'], formatted='(x, y)')
         self.assertFullArgSpecEquals(functools.partial(ham),
                                      ['x', 'y'], formatted='(x, y)')
         # Other variants
         def check_method(f):
-            self.assertFullArgSpecEquals(f, ['self', 'x', 'y'],
-                                         formatted='(self, x, y)')
+            self.assertArgSpecEquals(f, ['self', 'x', 'y'],
+                                        formatted='(self, x, y)')
         class C:
             @functools.wraps(mod.spam)
             def ham(self, x, y):
@@ -749,11 +792,11 @@ class TestClassesAndFunctions(unittest.TestCase):
         with self.assertRaises(TypeError):
             inspect.getfullargspec(builtin)
 
-    def test_getfullargspec_method(self):
+    def test_getargspec_method(self):
         class A(object):
             def m(self):
                 pass
-        self.assertFullArgSpecEquals(A.m, ['self'])
+        self.assertArgSpecEquals(A.m, ['self'])
 
     def test_classify_newstyle(self):
         class A(object):
@@ -2872,6 +2915,10 @@ class TestParameterObject(unittest.TestCase):
                                     'is not a valid parameter name'):
             inspect.Parameter('$', kind=inspect.Parameter.VAR_KEYWORD)
 
+        with self.assertRaisesRegex(ValueError,
+                                    'is not a valid parameter name'):
+            inspect.Parameter('.a', kind=inspect.Parameter.VAR_KEYWORD)
+
         with self.assertRaisesRegex(ValueError, 'cannot have default values'):
             inspect.Parameter('a', default=42,
                               kind=inspect.Parameter.VAR_KEYWORD)
@@ -2954,6 +3001,17 @@ class TestParameterObject(unittest.TestCase):
     def test_signature_parameter_positional_only(self):
         with self.assertRaisesRegex(TypeError, 'name must be a str'):
             inspect.Parameter(None, kind=inspect.Parameter.POSITIONAL_ONLY)
+
+    @cpython_only
+    def test_signature_parameter_implicit(self):
+        with self.assertRaisesRegex(ValueError,
+                                    'implicit arguments must be passed in as'):
+            inspect.Parameter('.0', kind=inspect.Parameter.POSITIONAL_ONLY)
+
+        param = inspect.Parameter(
+            '.0', kind=inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        self.assertEqual(param.kind, inspect.Parameter.POSITIONAL_ONLY)
+        self.assertEqual(param.name, 'implicit0')
 
     def test_signature_parameter_immutability(self):
         p = inspect.Parameter('spam', kind=inspect.Parameter.KEYWORD_ONLY)
@@ -3203,6 +3261,17 @@ class TestSignatureBind(unittest.TestCase):
         ba = sig.bind(args=1)
         self.assertEqual(ba.arguments, {'kwargs': {'args': 1}})
 
+    @cpython_only
+    def test_signature_bind_implicit_arg(self):
+        # Issue #19611: getcallargs should work with set comprehensions
+        def make_set():
+            return {z * z for z in range(5)}
+        setcomp_code = make_set.__code__.co_consts[1]
+        setcomp_func = types.FunctionType(setcomp_code, {})
+
+        iterator = iter(range(5))
+        self.assertEqual(self.call(setcomp_func, iterator), {0, 1, 4, 9, 16})
+
 
 class TestBoundArguments(unittest.TestCase):
     def test_signature_bound_arguments_unhashable(self):
@@ -3293,6 +3362,13 @@ class TestBoundArguments(unittest.TestCase):
         ba = sig.bind()
         ba.apply_defaults()
         self.assertEqual(list(ba.arguments.items()), [])
+
+        # Make sure a no-args binding still acquires proper defaults.
+        def foo(a='spam'): pass
+        sig = inspect.signature(foo)
+        ba = sig.bind()
+        ba.apply_defaults()
+        self.assertEqual(list(ba.arguments.items()), [('a', 'spam')])
 
 
 class TestSignaturePrivateHelpers(unittest.TestCase):
@@ -3506,14 +3582,14 @@ class TestMain(unittest.TestCase):
 
     def test_details(self):
         module = importlib.import_module('unittest')
-        rc, out, err = assert_python_ok('-m', 'inspect',
+        args = support.optim_args_from_interpreter_flags()
+        rc, out, err = assert_python_ok(*args, '-m', 'inspect',
                                         'unittest', '--details')
         output = out.decode()
         # Just a quick sanity check on the output
         self.assertIn(module.__name__, output)
         self.assertIn(module.__file__, output)
-        if not sys.flags.optimize:
-            self.assertIn(module.__cached__, output)
+        self.assertIn(module.__cached__, output)
         self.assertEqual(err, b'')
 
 

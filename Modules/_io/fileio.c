@@ -9,6 +9,9 @@
 #ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
 #endif
+#ifdef HAVE_IO_H
+#include <io.h>
+#endif
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
@@ -92,8 +95,7 @@ fileio_dealloc_warn(fileio *self, PyObject *source)
     if (self->fd >= 0 && self->closefd) {
         PyObject *exc, *val, *tb;
         PyErr_Fetch(&exc, &val, &tb);
-        if (PyErr_WarnFormat(PyExc_ResourceWarning, 1,
-                             "unclosed file %R", source)) {
+        if (PyErr_ResourceWarning(source, 1, "unclosed file %R", source)) {
             /* Spurious errors can appear at shutdown */
             if (PyErr_ExceptionMatches(PyExc_Warning))
                 PyErr_WriteUnraisable((PyObject *) self);
@@ -118,18 +120,13 @@ internal_close(fileio *self)
         int fd = self->fd;
         self->fd = -1;
         /* fd is accessible and someone else may have closed it */
-        if (_PyVerify_fd(fd)) {
-            Py_BEGIN_ALLOW_THREADS
-            _Py_BEGIN_SUPPRESS_IPH
-            err = close(fd);
-            if (err < 0)
-                save_errno = errno;
-            _Py_END_SUPPRESS_IPH
-            Py_END_ALLOW_THREADS
-        } else {
+        Py_BEGIN_ALLOW_THREADS
+        _Py_BEGIN_SUPPRESS_IPH
+        err = close(fd);
+        if (err < 0)
             save_errno = errno;
-            err = -1;
-        }
+        _Py_END_SUPPRESS_IPH
+        Py_END_ALLOW_THREADS
     }
     if (err < 0) {
         errno = save_errno;
@@ -156,8 +153,8 @@ _io_FileIO_close_impl(fileio *self)
     PyObject *exc, *val, *tb;
     int rc;
     _Py_IDENTIFIER(close);
-    res = _PyObject_CallMethodId((PyObject*)&PyRawIOBase_Type,
-                                 &PyId_close, "O", self);
+    res = _PyObject_CallMethodIdObjArgs((PyObject*)&PyRawIOBase_Type,
+                                        &PyId_close, self, NULL);
     if (!self->closefd) {
         self->fd = -1;
         return res;
@@ -233,12 +230,13 @@ _io_FileIO___init___impl(fileio *self, PyObject *nameobj, const char *mode,
                          int closefd, PyObject *opener)
 /*[clinic end generated code: output=23413f68e6484bbd input=193164e293d6c097]*/
 {
-    const char *name = NULL;
-    PyObject *stringobj = NULL;
-    const char *s;
 #ifdef MS_WINDOWS
     Py_UNICODE *widename = NULL;
+#else
+    const char *name = NULL;
 #endif
+    PyObject *stringobj = NULL;
+    const char *s;
     int ret = 0;
     int rwa = 0, plus = 0;
     int flags = 0;
@@ -280,24 +278,21 @@ _io_FileIO___init___impl(fileio *self, PyObject *nameobj, const char *mode,
         PyErr_Clear();
     }
 
+    if (fd < 0) {
 #ifdef MS_WINDOWS
-    if (PyUnicode_Check(nameobj)) {
         Py_ssize_t length;
-        widename = PyUnicode_AsUnicodeAndSize(nameobj, &length);
-        if (widename == NULL)
-            return -1;
-        if (wcslen(widename) != length) {
-            PyErr_SetString(PyExc_ValueError, "embedded null character");
+        if (!PyUnicode_FSDecoder(nameobj, &stringobj)) {
             return -1;
         }
-    } else
-#endif
-    if (fd < 0)
-    {
+        widename = PyUnicode_AsUnicodeAndSize(stringobj, &length);
+        if (widename == NULL)
+            return -1;
+#else
         if (!PyUnicode_FSConverter(nameobj, &stringobj)) {
             return -1;
         }
         name = PyBytes_AS_STRING(stringobj);
+#endif
     }
 
     s = mode;
@@ -389,11 +384,10 @@ _io_FileIO___init___impl(fileio *self, PyObject *nameobj, const char *mode,
             do {
                 Py_BEGIN_ALLOW_THREADS
 #ifdef MS_WINDOWS
-                if (widename != NULL)
-                    self->fd = _wopen(widename, flags, 0666);
-                else
+                self->fd = _wopen(widename, flags, 0666);
+#else
+                self->fd = open(name, flags, 0666);
 #endif
-                    self->fd = open(name, flags, 0666);
                 Py_END_ALLOW_THREADS
             } while (self->fd < 0 && errno == EINTR &&
                      !(async_err = PyErr_CheckSignals()));
@@ -421,7 +415,13 @@ _io_FileIO___init___impl(fileio *self, PyObject *nameobj, const char *mode,
 
             self->fd = _PyLong_AsInt(fdobj);
             Py_DECREF(fdobj);
-            if (self->fd == -1) {
+            if (self->fd < 0) {
+                if (!PyErr_Occurred()) {
+                    /* The opener returned a negative but didn't set an
+                       exception.  See issue #27066 */
+                    PyErr_Format(PyExc_ValueError,
+                                 "opener returned %d", self->fd);
+                }
                 goto error;
             }
         }
@@ -540,7 +540,7 @@ err_closed(void)
 }
 
 static PyObject *
-err_mode(char *action)
+err_mode(const char *action)
 {
     _PyIO_State *state = IO_STATE();
     if (state != NULL)
@@ -695,8 +695,6 @@ _io_FileIO_readall_impl(fileio *self)
 
     if (self->fd < 0)
         return err_closed();
-    if (!_PyVerify_fd(self->fd))
-        return PyErr_SetFromErrno(PyExc_IOError);
 
     _Py_BEGIN_SUPPRESS_IPH
 #ifdef MS_WINDOWS
@@ -836,7 +834,7 @@ _io.FileIO.write
     b: Py_buffer
     /
 
-Write bytes b to file, return number written.
+Write buffer b to file, return number of bytes written.
 
 Only makes one system call, so not all of the data may be written.
 The number of bytes actually written is returned.  In non-blocking mode,
@@ -845,7 +843,7 @@ returns None if the write would block.
 
 static PyObject *
 _io_FileIO_write_impl(fileio *self, Py_buffer *b)
-/*[clinic end generated code: output=b4059db3d363a2f7 input=ffbd8834f447ac31]*/
+/*[clinic end generated code: output=b4059db3d363a2f7 input=6e7908b36f0ce74f]*/
 {
     Py_ssize_t n;
     int err;
@@ -909,18 +907,15 @@ portable_lseek(int fd, PyObject *posobj, int whence)
             return NULL;
     }
 
-    if (_PyVerify_fd(fd)) {
-        Py_BEGIN_ALLOW_THREADS
-        _Py_BEGIN_SUPPRESS_IPH
+    Py_BEGIN_ALLOW_THREADS
+    _Py_BEGIN_SUPPRESS_IPH
 #ifdef MS_WINDOWS
-        res = _lseeki64(fd, pos, whence);
+    res = _lseeki64(fd, pos, whence);
 #else
-        res = lseek(fd, pos, whence);
+    res = lseek(fd, pos, whence);
 #endif
-        _Py_END_SUPPRESS_IPH
-        Py_END_ALLOW_THREADS
-    } else
-        res = -1;
+    _Py_END_SUPPRESS_IPH
+    Py_END_ALLOW_THREADS
     if (res < 0)
         return PyErr_SetFromErrno(PyExc_IOError);
 
@@ -1043,7 +1038,7 @@ _io_FileIO_truncate_impl(fileio *self, PyObject *posobj)
 }
 #endif /* HAVE_FTRUNCATE */
 
-static char *
+static const char *
 mode_string(fileio *self)
 {
     if (self->created) {
@@ -1111,10 +1106,7 @@ _io_FileIO_isatty_impl(fileio *self)
         return err_closed();
     Py_BEGIN_ALLOW_THREADS
     _Py_BEGIN_SUPPRESS_IPH
-    if (_PyVerify_fd(self->fd))
-        res = isatty(self->fd);
-    else
-        res = 0;
+    res = isatty(self->fd);
     _Py_END_SUPPRESS_IPH
     Py_END_ALLOW_THREADS
     return PyBool_FromLong(res);

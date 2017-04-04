@@ -190,8 +190,8 @@ bufferediobase_read1(PyObject *self, PyObject *args)
 PyDoc_STRVAR(bufferediobase_write_doc,
     "Write the given buffer to the IO stream.\n"
     "\n"
-    "Returns the number of bytes written, which is never less than\n"
-    "len(b).\n"
+    "Returns the number of bytes written, which is always the length of b\n"
+    "in bytes.\n"
     "\n"
     "Raises BlockingIOError if the buffer is full and the\n"
     "underlying raw stream cannot accept more data at the moment.\n");
@@ -305,7 +305,7 @@ _enter_buffered_busy(buffered *self)
             "could not acquire lock for %A at interpreter "
             "shutdown, possibly due to daemon threads",
             (PyObject *) self);
-        char *msg = PyUnicode_AsUTF8(msgobj);
+        const char *msg = PyUnicode_AsUTF8(msgobj);
         Py_FatalError(msg);
     }
     return 1;
@@ -454,7 +454,8 @@ buffered_dealloc_warn(buffered *self, PyObject *source)
 {
     if (self->ok && self->raw) {
         PyObject *r;
-        r = _PyObject_CallMethodId(self->raw, &PyId__dealloc_warn, "O", source);
+        r = _PyObject_CallMethodIdObjArgs(self->raw, &PyId__dealloc_warn,
+                                          source, NULL);
         if (r)
             Py_DECREF(r);
         else
@@ -659,7 +660,7 @@ _bufferedreader_raw_read(buffered *self, char *start, Py_ssize_t len);
 
 /* Sets the current error to BlockingIOError */
 static void
-_set_BlockingIOError(char *msg, Py_ssize_t written)
+_set_BlockingIOError(const char *msg, Py_ssize_t written)
 {
     PyObject *err;
     PyErr_Clear();
@@ -904,7 +905,7 @@ _io__Buffered_read_impl(buffered *self, Py_ssize_t n)
     CHECK_INITIALIZED(self)
     if (n < -1) {
         PyErr_SetString(PyExc_ValueError,
-                        "read length must be positive or -1");
+                        "read length must be non-negative or -1");
         return NULL;
     }
 
@@ -932,22 +933,20 @@ _io__Buffered_read_impl(buffered *self, Py_ssize_t n)
 
 /*[clinic input]
 _io._Buffered.read1
-    size as n: Py_ssize_t
+    size as n: Py_ssize_t = -1
     /
 [clinic start generated code]*/
 
 static PyObject *
 _io__Buffered_read1_impl(buffered *self, Py_ssize_t n)
-/*[clinic end generated code: output=bcc4fb4e54d103a3 input=8d2869c18b983184]*/
+/*[clinic end generated code: output=bcc4fb4e54d103a3 input=7d22de9630b61774]*/
 {
     Py_ssize_t have, r;
     PyObject *res = NULL;
 
     CHECK_INITIALIZED(self)
     if (n < 0) {
-        PyErr_SetString(PyExc_ValueError,
-                        "read length must be positive");
-        return NULL;
+        n = self->buffer_size;
     }
 
     CHECK_CLOSED(self, "read of closed file")
@@ -1196,8 +1195,7 @@ found:
         Py_CLEAR(res);
         goto end;
     }
-    Py_CLEAR(res);
-    res = _PyBytes_Join(_PyIO_empty_bytes, chunks);
+    Py_XSETREF(res, _PyBytes_Join(_PyIO_empty_bytes, chunks));
 
 end:
     LEAVE_BUFFERED(self)
@@ -1452,9 +1450,8 @@ _io_BufferedReader___init___impl(buffered *self, PyObject *raw,
     if (_PyIOBase_check_readable(raw, Py_True) == NULL)
         return -1;
 
-    Py_CLEAR(self->raw);
     Py_INCREF(raw);
-    self->raw = raw;
+    Py_XSETREF(self->raw, raw);
     self->buffer_size = buffer_size;
     self->readable = 1;
     self->writable = 0;
@@ -1692,8 +1689,7 @@ _bufferedreader_read_generic(buffered *self, Py_ssize_t n)
                 return res;
             }
             Py_DECREF(res);
-            Py_INCREF(Py_None);
-            return Py_None;
+            Py_RETURN_NONE;
         }
         remaining -= r;
         written += r;
@@ -1717,8 +1713,7 @@ _bufferedreader_read_generic(buffered *self, Py_ssize_t n)
                 return res;
             }
             Py_DECREF(res);
-            Py_INCREF(Py_None);
-            return Py_None;
+            Py_RETURN_NONE;
         }
         if (remaining > r) {
             memcpy(out + written, self->buffer + self->pos, r);
@@ -1805,9 +1800,8 @@ _io_BufferedWriter___init___impl(buffered *self, PyObject *raw,
     if (_PyIOBase_check_writable(raw, Py_True) == NULL)
         return -1;
 
-    Py_CLEAR(self->raw);
     Py_INCREF(raw);
-    self->raw = raw;
+    Py_XSETREF(self->raw, raw);
     self->readable = 0;
     self->writable = 1;
 
@@ -2309,9 +2303,8 @@ _io_BufferedRandom___init___impl(buffered *self, PyObject *raw,
     if (_PyIOBase_check_writable(raw, Py_True) == NULL)
         return -1;
 
-    Py_CLEAR(self->raw);
     Py_INCREF(raw);
-    self->raw = raw;
+    Py_XSETREF(self->raw, raw);
     self->buffer_size = buffer_size;
     self->readable = 1;
     self->writable = 1;
@@ -2402,7 +2395,6 @@ static PyMethodDef bufferedreader_methods[] = {
     {"close", (PyCFunction)buffered_close, METH_NOARGS},
     {"seekable", (PyCFunction)buffered_seekable, METH_NOARGS},
     {"readable", (PyCFunction)buffered_readable, METH_NOARGS},
-    {"writable", (PyCFunction)buffered_writable, METH_NOARGS},
     {"fileno", (PyCFunction)buffered_fileno, METH_NOARGS},
     {"isatty", (PyCFunction)buffered_isatty, METH_NOARGS},
     {"_dealloc_warn", (PyCFunction)buffered_dealloc_warn, METH_O},
@@ -2493,7 +2485,6 @@ static PyMethodDef bufferedwriter_methods[] = {
     {"close", (PyCFunction)buffered_close, METH_NOARGS},
     {"detach", (PyCFunction)buffered_detach, METH_NOARGS},
     {"seekable", (PyCFunction)buffered_seekable, METH_NOARGS},
-    {"readable", (PyCFunction)buffered_readable, METH_NOARGS},
     {"writable", (PyCFunction)buffered_writable, METH_NOARGS},
     {"fileno", (PyCFunction)buffered_fileno, METH_NOARGS},
     {"isatty", (PyCFunction)buffered_isatty, METH_NOARGS},

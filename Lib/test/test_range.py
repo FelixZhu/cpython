@@ -1,6 +1,6 @@
 # Python test set -- built-in functions
 
-import test.support, unittest
+import unittest
 import sys
 import pickle
 import itertools
@@ -492,6 +492,14 @@ class RangeTest(unittest.TestCase):
             iter2 = pyrange_reversed(start, end, step)
             test_id = "reversed(range({}, {}, {}))".format(start, end, step)
             self.assert_iterators_equal(iter1, iter2, test_id, limit=100)
+
+    def test_range_iterators_invocation(self):
+        # verify range iterators instances cannot be created by
+        # calling their type
+        rangeiter_type = type(iter(range(0)))
+        self.assertRaises(TypeError, rangeiter_type, 1, 3, 1)
+        long_rangeiter_type = type(iter(range(1 << 1000)))
+        self.assertRaises(TypeError, long_rangeiter_type, 1, 3, 1)
 
     def test_slice(self):
         def check(start, stop, step=None):
